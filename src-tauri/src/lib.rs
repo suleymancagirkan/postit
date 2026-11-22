@@ -665,6 +665,8 @@ fn write_notes_to_sqlite(conn: &mut Connection, notes: &[StoredNoteRecord]) -> R
 
     tx.commit()
         .map_err(|e| format!("Failed to commit SQLite transaction: {}", e))?;
+    // Checkpoint WAL immediately so deletions are durable even if app exits right away
+    let _ = conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);");
     Ok(())
 }
 
@@ -726,22 +728,6 @@ fn load_notes(app: AppHandle, db_state: State<'_, DbState>) -> Result<String, St
 
             for r in rows.flatten() {
                 notes.push(r);
-            }
-        }
-
-        if notes.is_empty() {
-            if let Ok(legacy_dir) = app.path().app_data_dir() {
-                let legacy_json_path = legacy_dir.join("notes.json");
-                if legacy_json_path.exists() {
-                    if let Ok(raw) = fs::read_to_string(&legacy_json_path) {
-                        if let Ok(migrated) = serde_json::from_str::<Vec<StoredNoteRecord>>(&raw) {
-                            if !migrated.is_empty() {
-                                let _ = write_notes_to_sqlite(conn, &migrated);
-                                notes = migrated;
-                            }
-                        }
-                    }
-                }
             }
         }
 

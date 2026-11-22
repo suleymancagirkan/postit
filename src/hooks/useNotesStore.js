@@ -286,7 +286,8 @@ export function useNotesStore() {
           const rawJson = await invoke("load_notes");
           if (rawJson) {
             const parsed = JSON.parse(rawJson);
-            if (Array.isArray(parsed) && parsed.length > 0) {
+            if (Array.isArray(parsed)) {
+              // Trust SQLite authoritative result even when empty ([]) so deleted notes never resurrect from localStorage
               loadedNotes = parsed;
             }
           }
@@ -532,11 +533,11 @@ export function useNotesStore() {
     );
   }, []);
 
-  // Deleting a note deletes its entire string-connected cluster
+  // Deleting a note deletes its entire string-connected cluster and flushes immediately to SQLite
   const deleteNote = useCallback((id) => {
     setNotes((prev) => {
       const cluster = getConnectedClusterIds(prev, id);
-      return prev
+      const nextNotes = prev
         .filter((note) => !cluster.has(note.id))
         .map((note) =>
           Array.isArray(note.linkedIds)
@@ -546,6 +547,18 @@ export function useNotesStore() {
             }
             : note
         );
+
+      const serialized = JSON.stringify(nextNotes);
+      try {
+        localStorage.setItem(STORAGE_KEY_NOTES, serialized);
+      } catch {
+        // ignore
+      }
+      if (isTauriRuntime()) {
+        invoke("save_notes", { notesJson: serialized }).catch(() => {});
+      }
+
+      return nextNotes;
     });
   }, []);
 
