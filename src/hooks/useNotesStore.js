@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 export const NOTE_SIZE_LIMITS = {
   MIN: 210,
-  MAX: 340,
+  MAX: 500,
   DEFAULT: 210,
 };
 
@@ -312,15 +312,15 @@ export function useNotesStore() {
       if (mounted) {
         const validNotes = Array.isArray(loadedNotes)
           ? loadedNotes.map((n) => ({
-              ...n,
-              width: clampNoteSize(n.width),
-              height: clampNoteSize(n.height),
-              pinnedTarget: n.pinnedTarget || null,
-              inBasket: Boolean(n.inBasket),
-              linkedIds: Array.isArray(n.linkedIds) ? n.linkedIds : [],
-              activeTimer: n.activeTimer || extractTimerSpecFromText(n.text),
-              drawing: Array.isArray(n.drawing) ? n.drawing : [],
-            }))
+            ...n,
+            width: clampNoteSize(n.width),
+            height: clampNoteSize(n.height),
+            pinnedTarget: n.pinnedTarget || null,
+            inBasket: Boolean(n.inBasket),
+            linkedIds: Array.isArray(n.linkedIds) ? n.linkedIds : [],
+            activeTimer: n.activeTimer || extractTimerSpecFromText(n.text),
+            drawing: Array.isArray(n.drawing) ? n.drawing : [],
+          }))
           : [];
         const maxZ = validNotes.reduce(
           (acc, item) => Math.max(acc, Number(item.zIndex) || 10),
@@ -536,9 +536,9 @@ export function useNotesStore() {
         .map((note) =>
           Array.isArray(note.linkedIds)
             ? {
-                ...note,
-                linkedIds: note.linkedIds.filter((lid) => !cluster.has(lid)),
-              }
+              ...note,
+              linkedIds: note.linkedIds.filter((lid) => !cluster.has(lid)),
+            }
             : note
         );
     });
@@ -610,11 +610,11 @@ export function useNotesStore() {
       return prev.map((note) =>
         cluster.has(note.id)
           ? {
-              ...note,
-              inBasket: true,
-              pinnedTarget: clearPin ? null : note.pinnedTarget,
-              updatedAt: now,
-            }
+            ...note,
+            inBasket: true,
+            pinnedTarget: clearPin ? null : note.pinnedTarget,
+            updatedAt: now,
+          }
           : note
       );
     });
@@ -647,11 +647,11 @@ export function useNotesStore() {
         note.inBasket
           ? note
           : {
-              ...note,
-              inBasket: true,
-              pinnedTarget: clearPins ? null : note.pinnedTarget,
-              updatedAt: now,
-            }
+            ...note,
+            inBasket: true,
+            pinnedTarget: clearPins ? null : note.pinnedTarget,
+            updatedAt: now,
+          }
       )
     );
   }, []);
@@ -664,11 +664,11 @@ export function useNotesStore() {
         !note.inBasket
           ? note
           : {
-              ...note,
-              inBasket: false,
-              pinnedTarget: clearPins ? null : note.pinnedTarget,
-              updatedAt: now,
-            }
+            ...note,
+            inBasket: false,
+            pinnedTarget: clearPins ? null : note.pinnedTarget,
+            updatedAt: now,
+          }
       )
     );
   }, []);
