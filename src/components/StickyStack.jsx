@@ -340,8 +340,7 @@ export default function StickyStack({
               clipPath:
                 isOverTrashLocal || isDiscarding
                   ? CRUMPLED_CLIP_PATH
-                  : NORMAL_CLIP_PATH,
-              transition: "clip-path 200ms cubic-bezier(0.34, 1.56, 0.64, 1)",
+                  : "none",
             }}
             className={`absolute inset-0 rounded-3xl ${activeTheme.bodyBg} ${activeTheme.border} border-2 paper-texture flex flex-col justify-between transition-shadow duration-200 ${
               isSnappedFree

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useId } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { GripHorizontal } from "lucide-react";
 import {
@@ -12,8 +12,6 @@ import MarkdownEditor from "./MarkdownEditor";
 // Irregular 12-point polygon clip-path that gives a realistic crumpled paper ball silhouette
 const CRUMPLED_CLIP_PATH =
   "polygon(14% 6%, 39% 1%, 66% 5%, 89% 13%, 98% 36%, 93% 67%, 85% 91%, 59% 98%, 31% 94%, 11% 85%, 2% 58%, 5% 27%)";
-const NORMAL_CLIP_PATH =
-  "polygon(0% 0%, 50% 0%, 100% 0%, 100% 25%, 100% 50%, 100% 75%, 100% 100%, 50% 100%, 25% 100%, 0% 100%, 0% 50%, 0% 25%)";
 
 /**
  * 3D Multi-Faceted Crumpled Paper Crease Overlay
@@ -122,9 +120,10 @@ export function CrumpledPaperCreases({ isCrumpled }) {
  * 2.5D Red-Headed & Grey-Metallic Push-Pin (Raptiye) SVG Component
  */
 function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
+  const uid = useId().replace(/:/g, "");
   return (
-    <div className="group relative flex flex-col items-center select-none">
-      <div className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-neutral-900/90 px-2 py-0.5 text-[10px] font-medium text-white opacity-0 shadow-md transition-opacity duration-150 group-hover:opacity-100">
+    <div className="group relative flex flex-col items-center select-none z-50">
+      <div className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-neutral-900/95 px-2 py-0.5 text-[10px] font-medium text-white opacity-0 shadow-md transition-opacity duration-150 group-hover:opacity-100 z-50">
         {isPinned ? `📌 ${targetLabel} (Çıkarmak için tıkla)` : "Bu ekrana sapla"}
       </div>
 
@@ -197,7 +196,7 @@ function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
         >
           <defs>
             <linearGradient
-              id="metalNeedle"
+              id={`metalNeedle_${uid}`}
               x1="13"
               y1="18"
               x2="17"
@@ -211,7 +210,7 @@ function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
             </linearGradient>
 
             <linearGradient
-              id="metalCollar"
+              id={`metalCollar_${uid}`}
               x1="10"
               y1="18"
               x2="20"
@@ -224,7 +223,7 @@ function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
             </linearGradient>
 
             <linearGradient
-              id="redFlange"
+              id={`redFlange_${uid}`}
               x1="6"
               y1="13"
               x2="24"
@@ -238,7 +237,7 @@ function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
             </linearGradient>
 
             <linearGradient
-              id="redNeck"
+              id={`redNeck_${uid}`}
               x1="10"
               y1="7"
               x2="20"
@@ -251,7 +250,7 @@ function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
             </linearGradient>
 
             <radialGradient
-              id="redTopCap"
+              id={`redTopCap_${uid}`}
               cx="0"
               cy="0"
               r="1"
@@ -268,12 +267,12 @@ function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
           {isPinned ? (
             <path
               d="M13.7 19.5 L16.3 19.5 L15.6 25.2 C15.4 25.8 14.6 25.8 14.4 25.2 Z"
-              fill="url(#metalNeedle)"
+              fill={`url(#metalNeedle_${uid})`}
             />
           ) : (
             <path
               d="M13.5 19.5 L16.5 19.5 L15.35 32.2 C15.2 33.1 14.8 33.1 14.65 32.2 Z"
-              fill="url(#metalNeedle)"
+              fill={`url(#metalNeedle_${uid})`}
             />
           )}
 
@@ -288,11 +287,11 @@ function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
             strokeLinecap="round"
           />
 
-          <ellipse cx="15" cy="19.2" rx="4.2" ry="1.4" fill="url(#metalCollar)" />
+          <ellipse cx="15" cy="19.2" rx="4.2" ry="1.4" fill={`url(#metalCollar_${uid})`} />
 
           <path
             d="M7.2 16.2 C7.2 13.6 10.6 12.2 15 12.2 C19.4 12.2 22.8 13.6 22.8 16.2 C22.8 18.2 19.5 19.5 15 19.5 C10.5 19.5 7.2 18.2 7.2 16.2 Z"
-            fill="url(#redFlange)"
+            fill={`url(#redFlange_${uid})`}
           />
           <path
             d="M8.4 15.8 C9.8 17.3 12.3 18 15 18 C17.7 18 20.2 17.3 21.6 15.8"
@@ -304,7 +303,7 @@ function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
 
           <path
             d="M10.8 7.5 L19.2 7.5 L20.4 15.2 C20.4 16.6 18 17.5 15 17.5 C12 17.5 9.6 16.6 9.6 15.2 Z"
-            fill="url(#redNeck)"
+            fill={`url(#redNeck_${uid})`}
           />
 
           <path
@@ -315,7 +314,7 @@ function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
             strokeLinecap="round"
           />
 
-          <ellipse cx="15" cy="6.8" rx="6.6" ry="3.6" fill="url(#redTopCap)" />
+          <ellipse cx="15" cy="6.8" rx="6.6" ry="3.6" fill={`url(#redTopCap_${uid})`} />
 
           <ellipse
             cx="12.6"
@@ -670,10 +669,9 @@ export default function PinnedNote({
         width: liveSize.width,
         height: liveSize.height,
         pointerEvents: actuallyVisible ? "auto" : "none",
-        clipPath: isCrumpled ? CRUMPLED_CLIP_PATH : NORMAL_CLIP_PATH,
-        transition: "clip-path 200ms cubic-bezier(0.34, 1.56, 0.64, 1)",
+        clipPath: isCrumpled ? CRUMPLED_CLIP_PATH : "none",
       }}
-      className={`fixed rounded-3xl ${theme.bodyBg} ${theme.border} border-2 paper-texture flex flex-col justify-between select-none transition-colors duration-200 ${
+      className={`fixed overflow-visible rounded-3xl ${theme.bodyBg} ${theme.border} border-2 paper-texture flex flex-col justify-between select-none transition-colors duration-200 ${
         isDragging
           ? "shadow-[0_28px_60px_-12px_rgba(0,0,0,0.45)] cursor-grabbing ring-2 ring-black/10"
           : "shadow-[0_14px_28px_-6px_rgba(0,0,0,0.26)] cursor-grab hover:shadow-[0_18px_36px_-8px_rgba(0,0,0,0.32)]"
@@ -688,7 +686,7 @@ export default function PinnedNote({
           type="button"
           data-no-drag="true"
           onClick={handleCenterPinClick}
-          className="absolute -top-4 left-1/2 -translate-x-1/2 z-30 bg-transparent border-0 p-0 outline-none cursor-pointer"
+          className="absolute -top-4 left-1/2 -translate-x-1/2 z-50 bg-transparent border-0 p-0 outline-none cursor-pointer overflow-visible"
         >
           <RealisticThumbtack
             isPinned={isPinnedToScreen}
@@ -700,7 +698,7 @@ export default function PinnedNote({
 
       {/* Top Adhesive Strip */}
       <div
-        className={`h-9 w-full rounded-t-[22px] ${theme.stripBg} border-b ${theme.border} px-3 flex items-center justify-between transition-colors duration-200`}
+        className={`relative z-10 h-9 w-full rounded-t-[22px] ${theme.stripBg} border-b ${theme.border} px-3 flex items-center justify-between transition-colors duration-200`}
       >
         <div className="flex items-center gap-1">
           <GripHorizontal className={`w-3.5 h-3.5 ${theme.subText} opacity-75`} />
