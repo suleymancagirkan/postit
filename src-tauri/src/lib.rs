@@ -4,7 +4,11 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use tauri::{AppHandle, Manager, State, WebviewWindow};
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Manager, State, WebviewWindow,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HitRect {
@@ -492,6 +496,14 @@ fn set_click_through(
 }
 
 #[tauri::command]
+fn minimize_to_tray(window: WebviewWindow) -> Result<(), String> {
+    let _ = window.set_skip_taskbar(true);
+    window
+        .hide()
+        .map_err(|e| format!("Failed to hide window to system tray: {}", e))
+}
+
+#[tauri::command]
 fn update_hit_regions(
     regions: Vec<HitRect>,
     is_dragging: bool,
@@ -587,7 +599,64 @@ pub fn run() {
             is_ignoring,
         })
         .setup(move |app| {
+            // Build System Tray icon & menu so minimizing hides to the background tray area (not taskbar)
+            let toggle_item =
+                MenuItem::with_id(app, "toggle", "Post-it Göster / Gizle", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Çıkış", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(app, &[&toggle_item, &quit_item])?;
+
+            let mut tray_builder = TrayIconBuilder::new()
+                .menu(&tray_menu)
+                .tooltip("Post-it")
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app_handle, event| match event.id.as_ref() {
+                    "toggle" => {
+                        if let Some(win) = app_handle.get_webview_window("main") {
+                            let is_vis = win.is_visible().unwrap_or(true);
+                            let _ = win.set_skip_taskbar(true);
+                            if is_vis {
+                                let _ = win.hide();
+                            } else {
+                                let _ = win.show();
+                                let _ = win.unminimize();
+                                let _ = win.set_focus();
+                            }
+                        }
+                    }
+                    "quit" => {
+                        app_handle.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app_handle = tray.app_handle();
+                        if let Some(win) = app_handle.get_webview_window("main") {
+                            let is_vis = win.is_visible().unwrap_or(true);
+                            let _ = win.set_skip_taskbar(true);
+                            if is_vis {
+                                let _ = win.hide();
+                            } else {
+                                let _ = win.show();
+                                let _ = win.unminimize();
+                                let _ = win.set_focus();
+                            }
+                        }
+                    }
+                });
+
+            if let Some(default_icon) = app.default_window_icon() {
+                tray_builder = tray_builder.icon(default_icon.clone());
+            }
+            let _tray = tray_builder.build(app)?;
+
             if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_skip_taskbar(true);
                 if let Ok(Some(monitor)) = window.primary_monitor() {
                     let size = monitor.size();
                     let pos = monitor.position();
@@ -652,6 +721,7 @@ pub fn run() {
             load_notes,
             save_notes,
             set_click_through,
+            minimize_to_tray,
             update_hit_regions,
             detect_target_at_point,
             check_notes_visibility

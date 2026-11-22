@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, ArrowUpRight, GripHorizontal, Layers, Magnet } from "lucide-react";
+import { Sparkles, ArrowUpRight, GripHorizontal, Minus } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import { POSTIT_COLORS, COLOR_LIST, NOTE_SIZE_LIMITS } from "../hooks/useNotesStore";
 import MarkdownEditor from "./MarkdownEditor";
 
@@ -180,6 +181,16 @@ export default function StickyStack({
     });
   };
 
+  const handleMinimizeToTray = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      await invoke("minimize_to_tray");
+    } catch {
+      // ignore in browser preview
+    }
+  };
+
   return (
     <div
       ref={stackContainerRef}
@@ -190,30 +201,10 @@ export default function StickyStack({
         left: STACK_ORIGIN.x,
         top: STACK_ORIGIN.y,
         width: cardSize,
-        height: cardSize + 28,
+        height: cardSize,
       }}
       className="fixed z-30 select-none"
     >
-      {/* Stack Header Badge */}
-      <div className="flex items-center justify-between w-full px-0.5 mb-1.5">
-        <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-neutral-900/85 text-white text-[11px] font-medium tracking-wide shadow-md">
-          <Layers className="w-3 h-3 text-amber-300" />
-          <span>Post-it Destesi</span>
-          {pinnedCount > 0 && (
-            <span className="ml-0.5 px-1.5 rounded-full bg-white/20 text-[10px] font-semibold">
-              {pinnedCount}
-            </span>
-          )}
-        </div>
-
-        {isTearing && !isSnappedFree && (
-          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-950 bg-amber-300/95 px-2 py-0.5 rounded-full shadow-sm animate-pulse">
-            <Magnet className="w-2.5 h-2.5" />
-            <span>{Math.round(magnetTension * 100)}%</span>
-          </span>
-        )}
-      </div>
-
       <div
         style={{ width: cardSize, height: cardSize }}
         className="relative"
@@ -345,6 +336,14 @@ export default function StickyStack({
                 >
                   <span>Yapıştır</span>
                   <ArrowUpRight className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleMinimizeToTray}
+                  title="Sistem Tepsisine Küçült (Arka Plana Gizle)"
+                  className={`inline-flex items-center justify-center w-5 h-5 rounded-full ${activeTheme.accentBg} ${activeTheme.text} hover:brightness-95 active:scale-95 transition cursor-pointer shadow-2xs`}
+                >
+                  <Minus className="w-3 h-3" />
                 </button>
               </div>
             </div>
