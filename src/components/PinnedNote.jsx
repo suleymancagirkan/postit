@@ -337,6 +337,7 @@ export default function PinnedNote({
   note,
   isVisibleOnScreen = true,
   isStringTargetHighlighted = false,
+  clusterEffect = null, // "hover-trash" | "dropping-trash" | "hover-basket" | "dropping-basket" | null
   onUpdate,
   onToggleScreenPin,
   onStartStringDrag,
@@ -369,8 +370,17 @@ export default function PinnedNote({
   const isPinnedToScreen = Boolean(note.pinnedTarget);
   const pinnedLabel = note.pinnedTarget?.label || "Masaüstü";
 
-  // Is the paper currently crumpled because it's hovering over or dropping into the trash can?
-  const isCrumpled = isOverTrashLocal || isBeingDeleted;
+  const isClusterTrashHover = clusterEffect === "hover-trash";
+  const isClusterTrashDrop = clusterEffect === "dropping-trash";
+  const isClusterBasketHover = clusterEffect === "hover-basket";
+  const isClusterBasketDrop = clusterEffect === "dropping-basket";
+
+  // Is the paper currently crumpled because it (or a note tied to it by string!) is over or dropping into the trash can?
+  const isCrumpled =
+    isOverTrashLocal ||
+    isBeingDeleted ||
+    isClusterTrashHover ||
+    isClusterTrashDrop;
 
   useEffect(() => {
     if (!isDragging) {
@@ -642,7 +652,7 @@ export default function PinnedNote({
       onPointerDown={handlePointerDown}
       initial={{ scale: 0.88, opacity: 0 }}
       animate={
-        isBeingDeleted
+        isBeingDeleted || isClusterTrashDrop
           ? {
               x: window.innerWidth - 155,
               y: window.innerHeight - 165,
@@ -650,7 +660,7 @@ export default function PinnedNote({
               rotate: 165,
               opacity: 0,
             }
-          : isBeingStashed
+          : isBeingStashed || isClusterBasketDrop
           ? {
               x: window.innerWidth - 155,
               y: window.innerHeight - 315,
@@ -669,14 +679,17 @@ export default function PinnedNote({
           : {
               x: livePos.x,
               y: livePos.y,
-              // When approaching the Trash Can, the card shrinks & crunches into a wrinkled paper ball (0.54)!
-              // When approaching the Storage Basket, it tilts neatly like a file card (0.76).
+              // When approaching the Trash Can (directly or pulled by a connected string!), crunch into a wrinkled paper ball
               scale: isDragging
                 ? isOverTrashLocal
                   ? 0.52
                   : isOverBasketLocal
                   ? 0.75
                   : 1.05
+                : isClusterTrashHover
+                ? 0.68
+                : isClusterBasketHover
+                ? 0.84
                 : 1,
               rotate:
                 isDragging || isResizing
@@ -685,6 +698,10 @@ export default function PinnedNote({
                     : isOverBasketLocal
                     ? -8
                     : 0
+                  : isClusterTrashHover
+                  ? 16
+                  : isClusterBasketHover
+                  ? -8
                   : note.rotation || 0,
               opacity: 1,
             }

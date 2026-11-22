@@ -9,7 +9,11 @@ import BasketDock, { isPointInBasketZone } from "./components/BasketDock";
 import AgentStringsLayer, {
   getNoteThumbtackAnchor,
 } from "./components/AgentStringsLayer";
-import { useNotesStore, clampNoteSize } from "./hooks/useNotesStore";
+import {
+  useNotesStore,
+  clampNoteSize,
+  getConnectedClusterIds,
+} from "./hooks/useNotesStore";
 import "./App.css";
 
 const BASKET_SUMMON_DURATION_MS = 25000;
@@ -60,6 +64,9 @@ export default function App() {
 
   // Timestamps of recently tied/plucked string pairs for damped harmonic guitar-string vibration
   const [pluckTimestampMap, setPluckTimestampMap] = useState({});
+
+  // Cluster chain-reaction animation state ("dropping-trash" | "dropping-basket") for notes tied to a dropped note
+  const [clusterDropAnim, setClusterDropAnim] = useState(null);
 
   const [visibilityMap, setVisibilityMap] = useState({});
 
@@ -286,8 +293,30 @@ export default function App() {
 
   const handleRestoreNoteFromBasket = useCallback(
     (noteId, clearPin = false) => {
+      const restoredCluster = getConnectedClusterIds(notes, noteId);
       restoreNoteFromBasket(noteId, clearPin);
-      if (basketNotes.length <= 1) {
+
+      // Vibrate all strings in the restored cluster
+      if (restoredCluster.size > 1) {
+        const ts = performance.now();
+        setPluckTimestampMap((prev) => {
+          const next = { ...prev };
+          for (const idA of restoredCluster) {
+            for (const idB of restoredCluster) {
+              if (idA < idB) {
+                next[`${idA}__${idB}`] = ts;
+              }
+            }
+          }
+          return next;
+        });
+      }
+
+      const remainingInBasket = basketNotes.filter(
+        (n) => !restoredCluster.has(n.id)
+      ).length;
+
+      if (remainingInBasket <= 0) {
         setIsBasketSummoned(false);
         if (basketTimerRef.current) {
           clearTimeout(basketTimerRef.current);
@@ -297,7 +326,7 @@ export default function App() {
         summonBasketTemporarily(BASKET_SUMMON_DURATION_MS);
       }
     },
-    [restoreNoteFromBasket, basketNotes.length, summonBasketTemporarily]
+    [notes, restoreNoteFromBasket, basketNotes, summonBasketTemporarily]
   );
 
   // Update live 60fps coordinates of a dragged note and trigger a subtle string vibration on drop
@@ -465,6 +494,20 @@ export default function App() {
         };
       }
 
+      if (isDrop && noteId && (overTrash || overBasket)) {
+        const clusterIds = getConnectedClusterIds(notes, noteId);
+        if (clusterIds.size > 1) {
+          setClusterDropAnim({
+            ids: clusterIds,
+            sourceId: noteId,
+            mode: overTrash ? "dropping-trash" : "dropping-basket",
+          });
+          setTimeout(() => {
+            setClusterDropAnim(null);
+          }, 290);
+        }
+      }
+
       setDragState({
         isDragging: false,
         isOverTrash: false,
@@ -481,8 +524,14 @@ export default function App() {
         droppedInBasket: Boolean(isDrop && overBasket),
       };
     },
-    [applyIgnoreCursorEvents, syncInteractiveRegions]
+    [notes, applyIgnoreCursorEvents, syncInteractiveRegions]
   );
+
+  // Active cluster of the currently dragged note (so tied partner notes react over Trash/Basket)
+  const draggedClusterIds =
+    dragState.isDragging && dragState.noteId
+      ? getConnectedClusterIds(notes, dragState.noteId)
+      : null;
 
   return (
     <main className="relative w-screen h-screen bg-transparent overflow-hidden select-none">
@@ -507,12 +556,33 @@ export default function App() {
           ? visibilityMap[note.id] !== false
           : true;
 
+        // Determine if this note is being pulled into Trash or Basket via a connected red string
+        let clusterEffect = null;
+        if (
+          clusterDropAnim &&
+          clusterDropAnim.ids.has(note.id) &&
+          clusterDropAnim.sourceId !== note.id
+        ) {
+          clusterEffect = clusterDropAnim.mode;
+        } else if (
+          draggedClusterIds &&
+          draggedClusterIds.has(note.id) &&
+          dragState.noteId !== note.id
+        ) {
+          if (dragState.isOverTrash) {
+            clusterEffect = "hover-trash";
+          } else if (dragState.isOverBasket) {
+            clusterEffect = "hover-basket";
+          }
+        }
+
         return (
           <PinnedNote
             key={note.id}
             note={note}
             isVisibleOnScreen={isVisibleOnScreen}
             isStringTargetHighlighted={activeStringDrag?.targetId === note.id}
+            clusterEffect={clusterEffect}
             onUpdate={updateNote}
             onToggleScreenPin={toggleNoteScreenPin}
             onStartStringDrag={handleStartStringDrag}

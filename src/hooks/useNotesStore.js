@@ -111,6 +111,54 @@ function isTauriRuntime() {
   return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 }
 
+/**
+ * Finds all note IDs connected to `startId` (transitively via BFS over `linkedIds`).
+ */
+export function getConnectedClusterIds(notesList, startId) {
+  const visited = new Set();
+  if (!startId || !Array.isArray(notesList)) return visited;
+
+  const byId = new Map(notesList.map((n) => [n.id, n]));
+  if (!byId.has(startId)) {
+    visited.add(startId);
+    return visited;
+  }
+
+  const queue = [startId];
+  visited.add(startId);
+
+  while (queue.length > 0) {
+    const currentId = queue.shift();
+    const currentNote = byId.get(currentId);
+    if (!currentNote) continue;
+
+    // Outgoing links
+    const links = Array.isArray(currentNote.linkedIds)
+      ? currentNote.linkedIds
+      : [];
+    for (const neighborId of links) {
+      if (byId.has(neighborId) && !visited.has(neighborId)) {
+        visited.add(neighborId);
+        queue.push(neighborId);
+      }
+    }
+
+    // Incoming links (in case any link was one-way)
+    for (const other of notesList) {
+      if (
+        !visited.has(other.id) &&
+        Array.isArray(other.linkedIds) &&
+        other.linkedIds.includes(currentId)
+      ) {
+        visited.add(other.id);
+        queue.push(other.id);
+      }
+    }
+  }
+
+  return visited;
+}
+
 export function useNotesStore() {
   const [notes, setNotes] = useState([]);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -298,17 +346,19 @@ export function useNotesStore() {
     );
   }, []);
 
-  // Toggle pinning a note to the screen/window directly underneath its center coordinate
+  // Toggle pinning a note (and any notes tied to it via detective strings) to the screen/window underneath
   const toggleNoteScreenPin = useCallback(async (note) => {
     if (note.pinnedTarget) {
-      // Unpin -> becomes globally visible again
-      setNotes((prev) =>
-        prev.map((n) =>
-          n.id === note.id
-            ? { ...n, pinnedTarget: null, updatedAt: Date.now() }
+      // Unpin entire connected string cluster
+      setNotes((prev) => {
+        const cluster = getConnectedClusterIds(prev, note.id);
+        const now = Date.now();
+        return prev.map((n) =>
+          cluster.has(n.id)
+            ? { ...n, pinnedTarget: null, updatedAt: now }
             : n
-        )
-      );
+        );
+      });
       return null;
     }
 
@@ -339,13 +389,15 @@ export function useNotesStore() {
       }
     }
 
-    setNotes((prev) =>
-      prev.map((n) =>
-        n.id === note.id
-          ? { ...n, pinnedTarget: detected, updatedAt: Date.now() }
+    setNotes((prev) => {
+      const cluster = getConnectedClusterIds(prev, note.id);
+      const now = Date.now();
+      return prev.map((n) =>
+        cluster.has(n.id)
+          ? { ...n, pinnedTarget: detected, updatedAt: now }
           : n
-      )
-    );
+      );
+    });
     return detected;
   }, []);
 
@@ -357,19 +409,21 @@ export function useNotesStore() {
     );
   }, []);
 
+  // Deleting a note deletes its entire string-connected cluster
   const deleteNote = useCallback((id) => {
-    setNotes((prev) =>
-      prev
-        .filter((note) => note.id !== id)
+    setNotes((prev) => {
+      const cluster = getConnectedClusterIds(prev, id);
+      return prev
+        .filter((note) => !cluster.has(note.id))
         .map((note) =>
-          Array.isArray(note.linkedIds) && note.linkedIds.includes(id)
+          Array.isArray(note.linkedIds)
             ? {
                 ...note,
-                linkedIds: note.linkedIds.filter((lid) => lid !== id),
+                linkedIds: note.linkedIds.filter((lid) => !cluster.has(lid)),
               }
             : note
-        )
-    );
+        );
+    });
   }, []);
 
   // Connect or disconnect two notes with a red detective string between their thumbtacks
@@ -427,39 +481,41 @@ export function useNotesStore() {
     );
   }, []);
 
-  // Move a single note into the storage basket (optionally clearing its screen pin)
+  // Move a note AND its entire connected string cluster into the storage basket together
   const stashNoteToBasket = useCallback((id, clearPin = false) => {
-    setNotes((prev) =>
-      prev.map((note) =>
-        note.id === id
+    setNotes((prev) => {
+      const cluster = getConnectedClusterIds(prev, id);
+      const now = Date.now();
+      return prev.map((note) =>
+        cluster.has(note.id)
           ? {
               ...note,
               inBasket: true,
               pinnedTarget: clearPin ? null : note.pinnedTarget,
-              updatedAt: Date.now(),
+              updatedAt: now,
             }
           : note
-      )
-    );
+      );
+    });
   }, []);
 
-  // Restore a single note from the basket back onto the screen
+  // Restore a note AND its entire connected string cluster from the basket back onto the screen together
   const restoreNoteFromBasket = useCallback((id, clearPin = false) => {
-    highestZRef.current += 1;
-    const nextZ = highestZRef.current;
-    setNotes((prev) =>
-      prev.map((note) =>
-        note.id === id
-          ? {
-              ...note,
-              inBasket: false,
-              pinnedTarget: clearPin ? null : note.pinnedTarget,
-              zIndex: nextZ,
-              updatedAt: Date.now(),
-            }
-          : note
-      )
-    );
+    setNotes((prev) => {
+      const cluster = getConnectedClusterIds(prev, id);
+      const now = Date.now();
+      return prev.map((note) => {
+        if (!cluster.has(note.id)) return note;
+        highestZRef.current += 1;
+        return {
+          ...note,
+          inBasket: false,
+          pinnedTarget: clearPin ? null : note.pinnedTarget,
+          zIndex: highestZRef.current,
+          updatedAt: now,
+        };
+      });
+    });
   }, []);
 
   // Move all currently active notes into the basket
