@@ -185,14 +185,18 @@ export default function App() {
   const handleDismissTimerAlarm = useCallback(
     (noteId) => {
       setRingingNoteIds((prev) => prev.filter((id) => id !== noteId));
-      // Clear the finished/cancelled activeTimer on that note and remove the timer chip from text if desired
-      updateNote(noteId, (note) => ({
-        activeTimer: null,
-        text: (note.text || "").replace(
-          /<span[^>]*data-timer-chip="true"[^>]*>.*?<\/span>/gi,
-          ""
-        ),
-      }));
+      // Use real DOM parsing to cleanly remove nested timer chip spans (no leftover </span> tags!)
+      updateNote(noteId, (note) => {
+        const container = document.createElement("div");
+        container.innerHTML = note.text || "";
+        container
+          .querySelectorAll('[data-timer-chip="true"]')
+          .forEach((chip) => chip.remove());
+        return {
+          activeTimer: null,
+          text: container.innerHTML,
+        };
+      });
     },
     [updateNote]
   );

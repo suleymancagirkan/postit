@@ -751,12 +751,15 @@ const PinnedNote = React.memo(function PinnedNote({
         height: liveSize.height,
         pointerEvents: actuallyVisible ? "auto" : "none",
         clipPath: isCrumpled ? CRUMPLED_CLIP_PATH : "none",
+        boxShadow: isClockAlarmRinging
+          ? `0 0 0 4px ${theme.hex}, 0 0 26px 4px ${theme.hex}aa, 0 22px 48px -10px rgba(0,0,0,0.35)`
+          : note.activeTimer && !isDragging
+          ? `0 0 0 2.5px ${theme.hexSoft}cc, 0 14px 30px -8px ${theme.hex}55`
+          : undefined,
       }}
       className={`fixed overflow-visible rounded-3xl ${theme.bodyBg} ${theme.border} border-2 paper-texture flex flex-col justify-between select-none transition-colors duration-200 ${
         isClockAlarmRinging
-          ? "ring-4 ring-rose-500 shadow-[0_24px_60px_-6px_rgba(244,63,94,0.75)]"
-          : note.activeTimer
-          ? "ring-2 ring-neutral-900/35 shadow-[0_18px_36px_-6px_rgba(0,0,0,0.34)]"
+          ? ""
           : isStringTargetHighlighted
           ? "ring-4 ring-red-500/80 shadow-[0_24px_55px_-10px_rgba(220,38,38,0.45)]"
           : isDragging
