@@ -1,12 +1,218 @@
 import React, { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import { GripHorizontal, Pin, Monitor, AppWindow } from "lucide-react";
+import { GripHorizontal } from "lucide-react";
 import {
   POSTIT_COLORS,
   COLOR_LIST,
   NOTE_SIZE_LIMITS,
   clampNoteSize,
 } from "../hooks/useNotesStore";
+
+/**
+ * 2.5D Red-Headed & Grey-Metallic Push-Pin (Raptiye) SVG Component
+ * - Unpinned: hovers tilted above the paper showing the full sharp metallic needle.
+ * - Pinned: plunges into the paper, hiding the lower needle tip inside the puncture hole
+ *   and casting a realistic contact shadow on the paper surface.
+ */
+function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
+  return (
+    <div className="group relative flex flex-col items-center select-none">
+      {/* Hover-only subtle tooltip so there is no permanent box around the pin */}
+      <div className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-neutral-900/90 px-2 py-0.5 text-[10px] font-medium text-white opacity-0 shadow-md transition-opacity duration-150 group-hover:opacity-100">
+        {isPinned ? `📌 ${targetLabel} (Çıkarmak için tıkla)` : "Bu ekrana sapla"}
+      </div>
+
+      {/* Contact / Floating Shadow on the Paper */}
+      <motion.div
+        initial={false}
+        animate={
+          isPinned
+            ? {
+                width: 14,
+                height: 6,
+                y: 25,
+                x: 2,
+                opacity: 0.42,
+                scale: 1,
+              }
+            : {
+                width: 18,
+                height: 6,
+                y: 29,
+                x: 7,
+                opacity: 0.22,
+                scale: 0.85,
+              }
+        }
+        transition={{ type: "spring", stiffness: 420, damping: 24 }}
+        className="pointer-events-none absolute rounded-full bg-black blur-[1.5px]"
+      />
+
+      {/* Puncture hole on the paper when the needle is pushed in */}
+      {isPinned && (
+        <div
+          style={{ top: 25 }}
+          className="pointer-events-none absolute w-1.5 h-1.5 rounded-full bg-neutral-950/75 ring-1 ring-black/20"
+        />
+      )}
+
+      {/* 2.5D Thumbtack Body */}
+      <motion.div
+        initial={false}
+        animate={
+          pinPulse
+            ? {
+                y: isPinned ? [-8, 5, 2] : [2, -10, -6],
+                rotate: isPinned ? [24, -6, -3] : [-3, 28, 24],
+                scale: [1, 0.92, 1.06, 1],
+              }
+            : isPinned
+            ? {
+                y: 3,
+                x: 0,
+                rotate: -3,
+                scale: 1,
+              }
+            : {
+                y: -6,
+                x: 3,
+                rotate: 24,
+                scale: 0.96,
+              }
+        }
+        transition={{ type: "spring", stiffness: 450, damping: 22 }}
+        className="relative z-10 drop-shadow-[0_3px_4px_rgba(0,0,0,0.3)] group-hover:scale-105 transition-transform"
+      >
+        <svg
+          width="30"
+          height="34"
+          viewBox="0 0 30 34"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+          className="overflow-visible"
+        >
+          <defs>
+            {/* Metallic Grey Needle Gradient */}
+            <linearGradient id="metalNeedle" x1="13" y1="18" x2="17" y2="33" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stopColor="#64748B" />
+              <stop offset="35%" stopColor="#F1F5F9" />
+              <stop offset="65%" stopColor="#94A3B8" />
+              <stop offset="100%" stopColor="#334155" />
+            </linearGradient>
+
+            {/* Metallic Collar Ring under the plastic body */}
+            <linearGradient id="metalCollar" x1="10" y1="18" x2="20" y2="21" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stopColor="#94A3B8" />
+              <stop offset="50%" stopColor="#F8FAFC" />
+              <stop offset="100%" stopColor="#475569" />
+            </linearGradient>
+
+            {/* 3D Red Plastic Lower Flange / Skirt */}
+            <linearGradient id="redFlange" x1="6" y1="13" x2="24" y2="20" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stopColor="#FB7185" />
+              <stop offset="35%" stopColor="#E11D48" />
+              <stop offset="85%" stopColor="#9F1239" />
+              <stop offset="100%" stopColor="#881337" />
+            </linearGradient>
+
+            {/* 3D Red Plastic Middle Neck */}
+            <linearGradient id="redNeck" x1="10" y1="7" x2="20" y2="16" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stopColor="#F43F5E" />
+              <stop offset="45%" stopColor="#BE123C" />
+              <stop offset="100%" stopColor="#881337" />
+            </linearGradient>
+
+            {/* 3D Red Plastic Top Cap Dome */}
+            <radialGradient
+              id="redTopCap"
+              cx="0"
+              cy="0"
+              r="1"
+              gradientUnits="userSpaceOnUse"
+              gradientTransform="translate(12.5 5.5) rotate(35) scale(10 7)"
+            >
+              <stop offset="0%" stopColor="#FFE4E6" />
+              <stop offset="22%" stopColor="#FB7185" />
+              <stop offset="65%" stopColor="#E11D48" />
+              <stop offset="100%" stopColor="#881337" />
+            </radialGradient>
+          </defs>
+
+          {/* Grey Steel Needle (Shorter when plunged into the paper, full sharp point when unpinned) */}
+          {isPinned ? (
+            <path
+              d="M13.7 19.5 L16.3 19.5 L15.6 25.2 C15.4 25.8 14.6 25.8 14.4 25.2 Z"
+              fill="url(#metalNeedle)"
+            />
+          ) : (
+            <path
+              d="M13.5 19.5 L16.5 19.5 L15.35 32.2 C15.2 33.1 14.8 33.1 14.65 32.2 Z"
+              fill="url(#metalNeedle)"
+            />
+          )}
+
+          {/* Needle Specular Highlight Line */}
+          <line
+            x1="14.7"
+            y1="20"
+            x2="14.9"
+            y2={isPinned ? "24.8" : "30.8"}
+            stroke="#FFFFFF"
+            strokeWidth="0.65"
+            strokeOpacity="0.85"
+            strokeLinecap="round"
+          />
+
+          {/* Metallic Grey Base Collar */}
+          <ellipse cx="15" cy="19.2" rx="4.2" ry="1.4" fill="url(#metalCollar)" />
+
+          {/* Lower Wide Red Plastic Flange (Base Skirt) */}
+          <path
+            d="M7.2 16.2 C7.2 13.6 10.6 12.2 15 12.2 C19.4 12.2 22.8 13.6 22.8 16.2 C22.8 18.2 19.5 19.5 15 19.5 C10.5 19.5 7.2 18.2 7.2 16.2 Z"
+            fill="url(#redFlange)"
+          />
+          {/* Flange Rim Highlight */}
+          <path
+            d="M8.4 15.8 C9.8 17.3 12.3 18 15 18 C17.7 18 20.2 17.3 21.6 15.8"
+            stroke="#FDA4AF"
+            strokeWidth="0.7"
+            strokeOpacity="0.55"
+            strokeLinecap="round"
+          />
+
+          {/* Tapered Cylinder Neck */}
+          <path
+            d="M10.8 7.5 L19.2 7.5 L20.4 15.2 C20.4 16.6 18 17.5 15 17.5 C12 17.5 9.6 16.6 9.6 15.2 Z"
+            fill="url(#redNeck)"
+          />
+
+          {/* Neck Left Specular Reflection */}
+          <path
+            d="M11.6 8.3 L11.0 14.8"
+            stroke="#FECDD3"
+            strokeWidth="1.1"
+            strokeOpacity="0.45"
+            strokeLinecap="round"
+          />
+
+          {/* Top Red Cap Head (3D Dome/Disk) */}
+          <ellipse cx="15" cy="6.8" rx="6.6" ry="3.6" fill="url(#redTopCap)" />
+
+          {/* Top Cap Glossy Specular Highlight */}
+          <ellipse
+            cx="12.6"
+            cy="5.4"
+            rx="2.8"
+            ry="1.15"
+            transform="rotate(-10 12.6 5.4)"
+            fill="#FFFFFF"
+            fillOpacity="0.65"
+          />
+        </svg>
+      </motion.div>
+    </div>
+  );
+}
 
 export default function PinnedNote({
   note,
@@ -37,7 +243,6 @@ export default function PinnedNote({
   const theme = POSTIT_COLORS[note.color] || POSTIT_COLORS.yellow;
   const isPinnedToScreen = Boolean(note.pinnedTarget);
   const pinnedLabel = note.pinnedTarget?.label || "Masaüstü";
-  const isDesktopTarget = note.pinnedTarget?.targetType === "desktop";
 
   useEffect(() => {
     if (!isDragging) {
@@ -54,7 +259,6 @@ export default function PinnedNote({
     }
   }, [note.width, note.height, isResizing]);
 
-  // If the note hides while hovered, notify parent so click-through can re-engage
   useEffect(() => {
     if (!isVisibleOnScreen) {
       onInteractiveLeave?.();
@@ -311,66 +515,19 @@ export default function PinnedNote({
           : "shadow-[0_14px_28px_-6px_rgba(0,0,0,0.26)] cursor-grab hover:shadow-[0_18px_36px_-8px_rgba(0,0,0,0.32)]"
       }`}
     >
-      {/* Top-Center Tactile Push-Pin (Raptiye) Button */}
-      <div
+      {/* Top-Center Realistic 2.5D Red-Headed & Metallic Grey Push-Pin (No box/border) */}
+      <button
+        type="button"
         data-no-drag="true"
-        className="absolute -top-3 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center"
+        onClick={handleCenterPinClick}
+        className="absolute -top-4 left-1/2 -translate-x-1/2 z-30 bg-transparent border-0 p-0 outline-none cursor-pointer"
       >
-        <motion.button
-          type="button"
-          onClick={handleCenterPinClick}
-          animate={
-            pinPulse
-              ? { scale: [1, 0.82, 1.18, 1], y: [0, 3, -1, 0] }
-              : {
-                  scale: isPinnedToScreen ? 1 : 0.96,
-                  y: isPinnedToScreen ? 2 : 0,
-                }
-          }
-          transition={{ duration: 0.25 }}
-          title={
-            isPinnedToScreen
-              ? `${pinnedLabel} ekranına sabitlendi (Kaldırmak için tıkla)`
-              : "Bulunduğu ekrana/pencereye sabitle (Sadece o ekranda görünür)"
-          }
-          className={`group relative flex items-center gap-1 px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
-            isPinnedToScreen
-              ? "bg-neutral-900 text-white border-neutral-700 shadow-[0_6px_14px_rgba(0,0,0,0.38)]"
-              : `${theme.stripBg} ${theme.text} ${theme.border} shadow-md hover:bg-neutral-900 hover:text-white hover:border-neutral-700`
-          }`}
-        >
-          {/* Pin Head Visual */}
-          <span
-            className={`w-2 h-2 rounded-full transition-colors ${
-              isPinnedToScreen
-                ? "bg-emerald-400 shadow-[0_0_6px_#34d399]"
-                : "bg-neutral-800/40 group-hover:bg-amber-300"
-            }`}
-          />
-          <Pin
-            className={`w-3 h-3 transition-transform duration-200 ${
-              isPinnedToScreen
-                ? "rotate-0 fill-current text-amber-300"
-                : "rotate-45 opacity-80 group-hover:rotate-12"
-            }`}
-          />
-          {isPinnedToScreen && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-tight max-w-[92px] truncate">
-              {isDesktopTarget ? (
-                <Monitor className="w-2.5 h-2.5 text-emerald-300 shrink-0" />
-              ) : (
-                <AppWindow className="w-2.5 h-2.5 text-sky-300 shrink-0" />
-              )}
-              <span className="truncate">{pinnedLabel}</span>
-            </span>
-          )}
-        </motion.button>
-
-        {/* Subtle pin needle hole shadow on paper when pinned */}
-        {isPinnedToScreen && (
-          <div className="w-2 h-1 rounded-full bg-black/25 blur-[0.5px] -mt-0.5 pointer-events-none" />
-        )}
-      </div>
+        <RealisticThumbtack
+          isPinned={isPinnedToScreen}
+          pinPulse={pinPulse}
+          targetLabel={pinnedLabel}
+        />
+      </button>
 
       {/* Top Adhesive Strip */}
       <div
