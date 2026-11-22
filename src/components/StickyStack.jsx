@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, GripHorizontal, Minus } from "lucide-react";
+import { Sparkles, GripHorizontal, Minus, Pencil, Undo2 } from "lucide-react";
 import { POSTIT_COLORS, COLOR_LIST, NOTE_SIZE_LIMITS } from "../hooks/useNotesStore";
 import MarkdownEditor from "./MarkdownEditor";
+import DoodleCanvas, { DOODLE_PENS } from "./DoodleCanvas";
 import { CrumpledPaperCreases } from "./PinnedNote";
 
 const CRUMPLED_CLIP_PATH =
@@ -34,6 +35,8 @@ export default function StickyStack({
   const [isDiscarding, setIsDiscarding] = useState(false);
   const [isOverTrashLocal, setIsOverTrashLocal] = useState(false);
   const [isOverBasketLocal, setIsOverBasketLocal] = useState(false);
+  const [isDrawingMode, setIsDrawingMode] = useState(false);
+  const [activePenId, setActivePenId] = useState("ink");
 
   // Moving the entire stack by dragging the top-left 6-dot grip icon
   const [stackPos, setStackPos] = useState(() => {
@@ -173,11 +176,13 @@ export default function StickyStack({
       } else if (dropResult?.droppedInBasket) {
         setIsOverTrashLocal(false);
         setIsOverBasketLocal(false);
+        setIsDrawingMode(false);
         onTearOffPin?.({
           x: 340,
           y: 120,
           text: draft.text,
           color: draft.color,
+          drawing: draft.drawing || [],
           inBasket: true,
         });
         setIsTearing(false);
@@ -186,11 +191,13 @@ export default function StickyStack({
       } else if (snappedFreeRef.current) {
         setIsOverTrashLocal(false);
         setIsOverBasketLocal(false);
+        setIsDrawingMode(false);
         onTearOffPin?.({
           x: finalX,
           y: finalY,
           text: draft.text,
           color: draft.color,
+          drawing: draft.drawing || [],
         });
         setIsTearing(false);
         setIsSnappedFree(false);
@@ -452,40 +459,107 @@ export default function StickyStack({
               </div>
             </div>
 
-            {/* Live Markdown Editor Body */}
-            <div className="flex-1 p-3 pb-1.5 flex flex-col overflow-hidden cursor-text" data-no-drag="true">
+            {/* Live Markdown Editor Body + Freehand Doodle Canvas Overlay */}
+            <div
+              className={`relative flex-1 p-3 pb-1.5 flex flex-col overflow-hidden ${
+                isDrawingMode ? "cursor-crosshair" : "cursor-text"
+              }`}
+              data-no-drag="true"
+            >
               <MarkdownEditor
                 resetKey={draft.sheetId}
                 value={draft.text}
                 onChange={(html) => onUpdateDraft({ text: html })}
-                placeholder="Notunuzu yazın ([] todo, **kalın**, *italik*) ve çekip koparın..."
+                placeholder="Notunuzu yazın ([] todo, @25d, Ctrl+V görsel) ve çekip koparın..."
                 textClass={activeTheme.text}
                 placeholderClass={activeTheme.placeholder}
               />
+
+              <DoodleCanvas
+                strokes={draft.drawing || []}
+                isDrawingMode={isDrawingMode}
+                activePenId={activePenId}
+                onChangeStrokes={(nextStrokes) =>
+                  onUpdateDraft({ drawing: nextStrokes })
+                }
+              />
             </div>
 
-            {/* Bottom Bar: Only the 6 Post-it Color Swatches (no color text on right) */}
+            {/* Bottom Bar: 6 Post-it Color Swatches & Freehand Drawing Mode Toggle */}
             <div
               data-no-drag="true"
-              className="px-3 pb-2.5 pt-1 flex items-center justify-start"
+              className="px-3 pb-2.5 pt-1 flex items-center justify-between"
             >
               <div className="flex items-center gap-1.5">
-                {COLOR_LIST.map((c) => {
-                  const isSelected = c.id === draft.color;
-                  return (
-                    <button
-                      key={c.id}
-                      type="button"
-                      title={c.label}
-                      onClick={() => onUpdateDraft({ color: c.id })}
-                      className={`w-3.5 h-3.5 rounded-full ${c.swatch} border border-black/20 transition-transform duration-150 cursor-pointer ${
-                        isSelected
-                          ? "scale-125 ring-2 ring-neutral-900/75 shadow-xs"
-                          : "hover:scale-110 opacity-85 hover:opacity-100"
-                      }`}
-                    />
-                  );
-                })}
+                {!isDrawingMode ? (
+                  COLOR_LIST.map((c) => {
+                    const isSelected = c.id === draft.color;
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        title={c.label}
+                        onClick={() => onUpdateDraft({ color: c.id })}
+                        className={`w-3.5 h-3.5 rounded-full ${c.swatch} border border-black/20 transition-transform duration-150 cursor-pointer ${
+                          isSelected
+                            ? "scale-125 ring-2 ring-neutral-900/75 shadow-xs"
+                            : "hover:scale-110 opacity-85 hover:opacity-100"
+                        }`}
+                      />
+                    );
+                  })
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    {DOODLE_PENS.map((pen) => {
+                      const isPenActive = pen.id === activePenId;
+                      return (
+                        <button
+                          key={pen.id}
+                          type="button"
+                          title={pen.label}
+                          onClick={() => setActivePenId(pen.id)}
+                          className={`w-3.5 h-3.5 rounded-full ${pen.swatchBg} border border-white/40 transition-transform cursor-pointer ${
+                            isPenActive
+                              ? "scale-125 ring-2 ring-neutral-900"
+                              : "opacity-70 hover:opacity-100"
+                          }`}
+                        />
+                      );
+                    })}
+                    {Array.isArray(draft.drawing) && draft.drawing.length > 0 && (
+                      <button
+                        type="button"
+                        title="Son Çizgiyi Geri Al"
+                        onClick={(e) => {
+                          const next = e.shiftKey
+                            ? []
+                            : draft.drawing.slice(0, -1);
+                          onUpdateDraft({ drawing: next });
+                        }}
+                        className={`p-0.5 rounded-md ${activeTheme.accentBg} ${activeTheme.text} hover:brightness-95 cursor-pointer`}
+                      >
+                        <Undo2 className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  title={
+                    isDrawingMode
+                      ? "Yazı Moduna Dön"
+                      : "Serbest Çizim (Kalem) Modunu Aç"
+                  }
+                  onClick={() => setIsDrawingMode((prev) => !prev)}
+                  className={`ml-0.5 p-1 rounded-full transition cursor-pointer ${
+                    isDrawingMode
+                      ? "bg-neutral-900 text-amber-300 shadow-xs scale-110"
+                      : `${activeTheme.accentBg} ${activeTheme.subText} opacity-75 hover:opacity-100`
+                  }`}
+                >
+                  <Pencil className="w-3 h-3" />
+                </button>
               </div>
             </div>
           </motion.div>

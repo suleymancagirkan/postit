@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useId } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { GripHorizontal } from "lucide-react";
+import { GripHorizontal, Pencil, Undo2 } from "lucide-react";
 import {
   POSTIT_COLORS,
   COLOR_LIST,
@@ -8,6 +8,7 @@ import {
   clampNoteSize,
 } from "../hooks/useNotesStore";
 import MarkdownEditor from "./MarkdownEditor";
+import DoodleCanvas, { DOODLE_PENS } from "./DoodleCanvas";
 
 // Irregular 12-point polygon clip-path that gives a realistic crumpled paper ball silhouette
 const CRUMPLED_CLIP_PATH =
@@ -364,6 +365,8 @@ export default function PinnedNote({
   const [isOverTrashLocal, setIsOverTrashLocal] = useState(false);
   const [isOverBasketLocal, setIsOverBasketLocal] = useState(false);
   const [pinPulse, setPinPulse] = useState(false);
+  const [isDrawingMode, setIsDrawingMode] = useState(false);
+  const [activePenId, setActivePenId] = useState("ink");
 
   const dragMetaRef = useRef(null);
   const resizeMetaRef = useRef(null);
@@ -795,14 +798,16 @@ export default function PinnedNote({
         )}
       </div>
 
-      {/* Editable Live Markdown Note Content (scrunches inward when crumpled) */}
+      {/* Editable Live Markdown Note Content + Freehand Doodle Canvas Overlay */}
       <div
         style={{
           transform: isCrumpled ? "scale(0.75) rotate(-8deg)" : "none",
           filter: isCrumpled ? "blur(0.4px)" : "none",
           transition: "transform 180ms ease, filter 180ms ease",
         }}
-        className="flex-1 p-3 pb-1.5 flex flex-col overflow-hidden cursor-text"
+        className={`relative flex-1 p-3 pb-1.5 flex flex-col overflow-hidden ${
+          isDrawingMode ? "cursor-crosshair" : "cursor-text"
+        }`}
         data-no-drag="true"
       >
         <MarkdownEditor
@@ -810,34 +815,97 @@ export default function PinnedNote({
           value={note.text}
           onFocus={() => onBringToFront?.(note.id)}
           onChange={(html) => onUpdate?.(note.id, { text: html })}
-          placeholder="Not yazın ([] todo, **kalın**, *italik*)..."
+          placeholder="Not yazın ([] todo, @25d, Ctrl+V görsel)..."
           textClass={theme.text}
           placeholderClass={theme.placeholder}
         />
+
+        <DoodleCanvas
+          strokes={note.drawing || []}
+          isDrawingMode={isDrawingMode}
+          activePenId={activePenId}
+          onChangeStrokes={(nextStrokes) =>
+            onUpdate?.(note.id, { drawing: nextStrokes })
+          }
+        />
       </div>
 
-      {/* Bottom Bar: Left Color Dots & Right Resize Handle */}
+      {/* Bottom Bar: Left Color Dots / Drawing Pen Tools & Right Resize Handle */}
       <div
         data-no-drag="true"
         className="px-3 pb-2.5 pt-1 flex items-center justify-between"
       >
         <div className="flex items-center gap-1.5">
-          {COLOR_LIST.map((c) => {
-            const isSelected = c.id === note.color;
-            return (
-              <button
-                key={c.id}
-                type="button"
-                title={c.label}
-                onClick={() => onUpdate?.(note.id, { color: c.id })}
-                className={`w-3.5 h-3.5 rounded-full ${c.swatch} border border-black/20 transition-transform duration-150 cursor-pointer ${
-                  isSelected
-                    ? "scale-125 ring-2 ring-neutral-900/70"
-                    : "hover:scale-110 opacity-75 hover:opacity-100"
-                }`}
-              />
-            );
-          })}
+          {!isDrawingMode ? (
+            COLOR_LIST.map((c) => {
+              const isSelected = c.id === note.color;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  title={c.label}
+                  onClick={() => onUpdate?.(note.id, { color: c.id })}
+                  className={`w-3.5 h-3.5 rounded-full ${c.swatch} border border-black/20 transition-transform duration-150 cursor-pointer ${
+                    isSelected
+                      ? "scale-125 ring-2 ring-neutral-900/70"
+                      : "hover:scale-110 opacity-75 hover:opacity-100"
+                  }`}
+                />
+              );
+            })
+          ) : (
+            <div className="flex items-center gap-1.5">
+              {DOODLE_PENS.map((pen) => {
+                const isPenActive = pen.id === activePenId;
+                return (
+                  <button
+                    key={pen.id}
+                    type="button"
+                    title={pen.label}
+                    onClick={() => setActivePenId(pen.id)}
+                    className={`w-3.5 h-3.5 rounded-full ${pen.swatchBg} border border-white/40 transition-transform cursor-pointer ${
+                      isPenActive
+                        ? "scale-125 ring-2 ring-neutral-900"
+                        : "opacity-70 hover:opacity-100"
+                    }`}
+                  />
+                );
+              })}
+              {Array.isArray(note.drawing) && note.drawing.length > 0 && (
+                <button
+                  type="button"
+                  title="Son Çizgiyi Geri Al (Shift+Tık: Tüm Çizimi Temizle)"
+                  onClick={(e) => {
+                    const next = e.shiftKey
+                      ? []
+                      : note.drawing.slice(0, -1);
+                    onUpdate?.(note.id, { drawing: next });
+                  }}
+                  className={`p-0.5 rounded-md ${theme.accentBg} ${theme.text} hover:brightness-95 cursor-pointer`}
+                >
+                  <Undo2 className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Freehand Drawing Mode Toggle Button */}
+          <button
+            type="button"
+            title={
+              isDrawingMode
+                ? "Yazı Moduna Dön"
+                : "Serbest Çizim (Kalem) Modunu Aç"
+            }
+            onClick={() => setIsDrawingMode((prev) => !prev)}
+            className={`ml-0.5 p-1 rounded-full transition cursor-pointer ${
+              isDrawingMode
+                ? "bg-neutral-900 text-amber-300 shadow-xs scale-110"
+                : `${theme.accentBg} ${theme.subText} opacity-75 hover:opacity-100`
+            }`}
+          >
+            <Pencil className="w-3 h-3" />
+          </button>
         </div>
 
         {/* Diagonal Corner Resize Handle */}

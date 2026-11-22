@@ -484,6 +484,8 @@ struct StoredNoteRecord {
     #[serde(default)]
     active_timer: Option<serde_json::Value>,
     #[serde(default)]
+    drawing: Option<serde_json::Value>,
+    #[serde(default)]
     created_at: i64,
     #[serde(default)]
     updated_at: i64,
@@ -538,9 +540,10 @@ fn open_notes_db(app: &AppHandle) -> Result<Connection, String> {
              sort_order INTEGER NOT NULL DEFAULT 0
          );",
     );
-    // Ensure existing postit.db tables get the linked_ids_json and active_timer_json columns smoothly
+    // Ensure existing postit.db tables get the linked_ids_json, active_timer_json, and drawing_json columns smoothly
     let _ = conn.execute("ALTER TABLE notes ADD COLUMN linked_ids_json TEXT", []);
     let _ = conn.execute("ALTER TABLE notes ADD COLUMN active_timer_json TEXT", []);
+    let _ = conn.execute("ALTER TABLE notes ADD COLUMN drawing_json TEXT", []);
 
     Ok(conn)
 }
@@ -558,8 +561,8 @@ fn write_notes_to_sqlite(conn: &mut Connection, notes: &[StoredNoteRecord]) -> R
             .prepare(
                 "INSERT INTO notes (
                     id, text, color, x, y, width, height, rotation,
-                    z_index, in_basket, pinned_target_json, linked_ids_json, active_timer_json, created_at, updated_at, sort_order
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                    z_index, in_basket, pinned_target_json, linked_ids_json, active_timer_json, drawing_json, created_at, updated_at, sort_order
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             )
             .map_err(|e| format!("Failed to prepare SQLite insert: {}", e))?;
 
@@ -571,6 +574,10 @@ fn write_notes_to_sqlite(conn: &mut Connection, notes: &[StoredNoteRecord]) -> R
             let linked_json = serde_json::to_string(&n.linked_ids).unwrap_or_else(|_| "[]".to_string());
             let timer_json = n
                 .active_timer
+                .as_ref()
+                .and_then(|v| if v.is_null() { None } else { serde_json::to_string(v).ok() });
+            let drawing_json = n
+                .drawing
                 .as_ref()
                 .and_then(|v| if v.is_null() { None } else { serde_json::to_string(v).ok() });
 
@@ -588,6 +595,7 @@ fn write_notes_to_sqlite(conn: &mut Connection, notes: &[StoredNoteRecord]) -> R
                 pinned_json,
                 linked_json,
                 timer_json,
+                drawing_json,
                 n.created_at,
                 n.updated_at,
                 idx as i64
@@ -610,7 +618,7 @@ fn load_notes(app: AppHandle) -> Result<String, String> {
         let mut stmt = conn
             .prepare(
                 "SELECT id, text, color, x, y, width, height, rotation,
-                        z_index, in_basket, pinned_target_json, linked_ids_json, active_timer_json, created_at, updated_at
+                        z_index, in_basket, pinned_target_json, linked_ids_json, active_timer_json, drawing_json, created_at, updated_at
                  FROM notes
                  ORDER BY sort_order ASC, created_at ASC",
             )
@@ -631,6 +639,10 @@ fn load_notes(app: AppHandle) -> Result<String, String> {
                 let active_timer = timer_raw
                     .as_deref()
                     .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+                let drawing_raw: Option<String> = row.get(13).ok().flatten();
+                let drawing = drawing_raw
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
                 let in_basket_int: i64 = row.get(9)?;
 
                 Ok(StoredNoteRecord {
@@ -647,8 +659,9 @@ fn load_notes(app: AppHandle) -> Result<String, String> {
                     pinned_target,
                     linked_ids,
                     active_timer,
-                    created_at: row.get(13)?,
-                    updated_at: row.get(14)?,
+                    drawing,
+                    created_at: row.get(14)?,
+                    updated_at: row.get(15)?,
                 })
             })
             .map_err(|e| format!("Failed to map SQLite rows: {}", e))?;

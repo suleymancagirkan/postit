@@ -2,6 +2,64 @@ import React, { useRef, useEffect, useState } from "react";
 
 const CHECKBOX_SVG_CHECKED = `<svg viewBox="0 0 14 14" fill="none" class="w-3 h-3 text-white pointer-events-none"><path d="M3 7.3L5.8 10L11 4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
+// Cute vibrant vector clock icon for @25d / @19.20 inline timer badges (no emoji)
+const TIMER_CHIP_ICON_SVG = `<svg viewBox="0 0 16 16" fill="none" class="w-3.5 h-3.5 shrink-0 pointer-events-none"><circle cx="8" cy="8.5" r="5.8" stroke="currentColor" stroke-width="1.7"/><path d="M8 5.5V8.5L10.2 9.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.2 1.8H9.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12.6" cy="3.8" r="1" fill="currentColor"/></svg>`;
+
+/**
+ * Downscales & compresses a pasted or dropped screenshot/image Blob into a lightweight data URL
+ * so screenshots stay crisp on the Post-it and fast inside SQLite postit.db.
+ */
+function compressImageFileToDataUrl(file, maxWidth = 480) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = img.width > maxWidth ? maxWidth / img.width : 1;
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.86));
+      };
+      img.onerror = reject;
+      img.src = ev.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Creates a Polaroid/Sticker screenshot element inside the Post-it note with a hover delete button.
+ */
+function createScreenshotFigureElement(dataUrl) {
+  const wrapper = document.createElement("div");
+  wrapper.setAttribute("data-screenshot-card", "true");
+  wrapper.setAttribute("contenteditable", "false");
+  wrapper.className =
+    "group/img relative my-1.5 p-1.5 rounded-2xl bg-white/75 border border-black/15 shadow-sm select-none overflow-hidden";
+
+  const img = document.createElement("img");
+  img.src = dataUrl;
+  img.alt = "Ekran Görüntüsü";
+  img.className = "w-full max-h-40 object-contain rounded-xl pointer-events-none block";
+
+  const removeBtn = document.createElement("span");
+  removeBtn.setAttribute("data-remove-screenshot", "true");
+  removeBtn.title = "Görseli Kaldır";
+  removeBtn.className =
+    "absolute top-2.5 right-2.5 w-5 h-5 rounded-full bg-neutral-900/85 hover:bg-rose-600 text-white text-xs font-bold flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity cursor-pointer shadow-md";
+  removeBtn.textContent = "×";
+
+  wrapper.appendChild(img);
+  wrapper.appendChild(removeBtn);
+  return wrapper;
+}
+
 /**
  * Builds a DOM element for an interactive Todo row inside the contentEditable surface.
  */
@@ -283,8 +341,8 @@ function tryApplyLiveMarkdown() {
     chip.setAttribute("data-timer-expr", rawExpr);
     chip.setAttribute("contenteditable", "false");
     chip.className =
-      "inline-flex items-center gap-1 px-2 py-0.5 mx-0.5 rounded-full bg-black/12 text-inherit font-extrabold text-[11.5px] border border-black/20 shadow-2xs select-none align-baseline";
-    chip.textContent = `⏰ ${rawExpr}`;
+      "inline-flex items-center gap-1 px-2.5 py-0.5 mx-0.5 rounded-full bg-white/65 text-inherit font-extrabold text-[11.5px] border border-black/15 shadow-[0_2px_6px_rgba(0,0,0,0.08)] ring-1 ring-white/50 select-none align-middle transition-transform hover:scale-105";
+    chip.innerHTML = `${TIMER_CHIP_ICON_SVG}<span class="tracking-tight">${rawExpr}</span>`;
 
     const parent = anchorNode.parentNode;
     if (anchorNode.nextSibling) {
@@ -384,8 +442,12 @@ export default function MarkdownEditor({
 
   const computeIsEditorEmpty = (el) => {
     if (!el) return true;
-    const hasTodo = Boolean(el.querySelector('[data-todo-item="true"]'));
-    if (hasTodo) return false;
+    const hasRichBlock = Boolean(
+      el.querySelector(
+        '[data-todo-item="true"], [data-screenshot-card="true"], [data-timer-chip="true"]'
+      )
+    );
+    if (hasRichBlock) return false;
     const plain = el.innerText.replace(/\u200B/g, "").trim();
     return plain.length === 0;
   };
@@ -419,8 +481,20 @@ export default function MarkdownEditor({
     emitCurrentHtml();
   };
 
-  // Toggle interactive Todo checkbox on click
+  // Toggle interactive Todo checkbox OR remove pasted screenshot on click
   const handleEditorMouseDown = (e) => {
+    const removeImgBtn = e.target.closest?.('[data-remove-screenshot="true"]');
+    if (removeImgBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const card = removeImgBtn.closest('[data-screenshot-card="true"]');
+      if (card) {
+        card.remove();
+        emitCurrentHtml();
+      }
+      return;
+    }
+
     const box = e.target.closest?.('[data-todo-box="true"]');
     if (!box) return;
 
@@ -433,6 +507,61 @@ export default function MarkdownEditor({
     const currentlyChecked = row.getAttribute("data-checked") === "true";
     setTodoItemCheckedState(row, !currentlyChecked);
     emitCurrentHtml();
+  };
+
+  const insertImageFileIntoEditor = async (file) => {
+    const el = editorRef.current;
+    if (!el || !file) return;
+    try {
+      const dataUrl = await compressImageFileToDataUrl(file);
+      const fig = createScreenshotFigureElement(dataUrl);
+
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount && el.contains(sel.anchorNode)) {
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        range.insertNode(fig);
+        placeCaretAfterElement(fig);
+      } else {
+        el.appendChild(fig);
+        placeCaretAfterElement(fig);
+      }
+      emitCurrentHtml();
+    } catch {
+      // ignore invalid image
+    }
+  };
+
+  // Support Ctrl+V pasting screenshots / images from clipboard directly onto the Post-it
+  const handlePaste = async (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (const item of items) {
+      if (item.type && item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) {
+          await insertImageFileIntoEditor(file);
+        }
+        return;
+      }
+    }
+  };
+
+  // Support dragging & dropping an image file onto the Post-it
+  const handleDrop = async (e) => {
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+
+    for (const file of files) {
+      if (file.type && file.type.startsWith("image/")) {
+        e.preventDefault();
+        e.stopPropagation();
+        await insertImageFileIntoEditor(file);
+        return;
+      }
+    }
   };
 
   const handleKeyDown = (e) => {
@@ -538,6 +667,8 @@ export default function MarkdownEditor({
         contentEditable
         suppressContentEditableWarning
         onMouseDown={handleEditorMouseDown}
+        onPaste={handlePaste}
+        onDrop={handleDrop}
         onInput={handleInput}
         onKeyDown={handleKeyDown}
         onFocus={onFocus}

@@ -257,6 +257,7 @@ export function useNotesStore() {
         return {
           text: parsed.text ?? "",
           color: POSTIT_COLORS[parsed.color] ? parsed.color : "yellow",
+          drawing: Array.isArray(parsed.drawing) ? parsed.drawing : [],
           sheetId: parsed.sheetId || 1,
         };
       }
@@ -266,6 +267,7 @@ export function useNotesStore() {
     return {
       text: "",
       color: "yellow",
+      drawing: [],
       sheetId: 1,
     };
   });
@@ -317,6 +319,7 @@ export function useNotesStore() {
               inBasket: Boolean(n.inBasket),
               linkedIds: Array.isArray(n.linkedIds) ? n.linkedIds : [],
               activeTimer: n.activeTimer || extractTimerSpecFromText(n.text),
+              drawing: Array.isArray(n.drawing) ? n.drawing : [],
             }))
           : [];
         const maxZ = validNotes.reduce(
@@ -373,12 +376,13 @@ export function useNotesStore() {
     setStackDraft((prev) => ({
       text: "",
       color: nextColor || prev.color,
+      drawing: [],
       sheetId: (prev.sheetId || 1) + 1,
     }));
   }, []);
 
   const pinNoteFromStack = useCallback(
-    ({ x, y, text, color, inBasket = false }) => {
+    ({ x, y, text, color, drawing, inBasket = false }) => {
       highestZRef.current += 1;
       const now = Date.now();
       const size = NOTE_SIZE_LIMITS.DEFAULT;
@@ -387,6 +391,9 @@ export function useNotesStore() {
 
       const textVal = (text ?? stackDraft.text).trim() || "";
       const initialTimer = extractTimerSpecFromText(textVal);
+      const initialDrawing = Array.isArray(drawing ?? stackDraft.drawing)
+        ? drawing ?? stackDraft.drawing
+        : [];
 
       const newNote = {
         id: `note_${now}_${Math.random().toString(36).slice(2, 7)}`,
@@ -402,6 +409,7 @@ export function useNotesStore() {
         inBasket: Boolean(inBasket),
         linkedIds: [],
         activeTimer: initialTimer,
+        drawing: initialDrawing,
         rotation: pickNaturalAngle(notes.length + Math.floor(Math.random() * 6)),
         zIndex: highestZRef.current,
         createdAt: now,

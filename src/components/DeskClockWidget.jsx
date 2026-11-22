@@ -868,8 +868,15 @@ export default function DeskClockWidget({
                         stroke={tTheme.hex}
                         strokeWidth="1.3"
                       />
+                      <circle cx="-26" cy="0" r="3.4" fill={tTheme.hex} />
+                      <path
+                        d="M-26 -1.8 L-26 0 L-24.7 0.9"
+                        stroke="#09090B"
+                        strokeWidth="1.1"
+                        strokeLinecap="round"
+                      />
                       <text
-                        x="0"
+                        x="4"
                         y="3.2"
                         textAnchor="middle"
                         fill={tTheme.hexSoft}
@@ -878,8 +885,8 @@ export default function DeskClockWidget({
                         fontFamily="ui-monospace, SFMono-Regular, Consolas, monospace"
                       >
                         {entry.isRinging
-                          ? "⏰ DOLDU!"
-                          : `⏰ ${formatRemainingTime(entry.remainingMs)}`}
+                          ? "DOLDU!"
+                          : formatRemainingTime(entry.remainingMs)}
                       </text>
                     </g>
                   );
