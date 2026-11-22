@@ -1,7 +1,12 @@
 import React, { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import { GripHorizontal, Palette, Check } from "lucide-react";
-import { POSTIT_COLORS, COLOR_LIST } from "../hooks/useNotesStore";
+import { GripHorizontal } from "lucide-react";
+import {
+  POSTIT_COLORS,
+  COLOR_LIST,
+  NOTE_SIZE_LIMITS,
+  clampNoteSize,
+} from "../hooks/useNotesStore";
 
 export default function PinnedNote({
   note,
@@ -13,27 +18,39 @@ export default function PinnedNote({
   onInteractiveLeave,
 }) {
   const [isDragging, setIsDragging] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
   const [livePos, setLivePos] = useState({ x: note.x, y: note.y });
+  const [liveSize, setLiveSize] = useState({
+    width: clampNoteSize(note.width),
+    height: clampNoteSize(note.height),
+  });
   const [isBeingDeleted, setIsBeingDeleted] = useState(false);
-  const [showPalette, setShowPalette] = useState(false);
   const [isOverTrashLocal, setIsOverTrashLocal] = useState(false);
 
   const dragMetaRef = useRef(null);
+  const resizeMetaRef = useRef(null);
   const cardRef = useRef(null);
 
   const theme = POSTIT_COLORS[note.color] || POSTIT_COLORS.yellow;
 
-  // Keep livePos synced when note coordinates change externally
   useEffect(() => {
     if (!isDragging) {
       setLivePos({ x: note.x, y: note.y });
     }
   }, [note.x, note.y, isDragging]);
 
+  useEffect(() => {
+    if (!isResizing) {
+      setLiveSize({
+        width: clampNoteSize(note.width),
+        height: clampNoteSize(note.height),
+      });
+    }
+  }, [note.width, note.height, isResizing]);
+
   const handlePointerDown = (e) => {
     onBringToFront?.(note.id);
 
-    // Allow normal editing/clicking inside textarea or buttons
     if (
       e.target.closest("[data-no-drag='true']") ||
       e.target.tagName.toLowerCase() === "textarea" ||
@@ -53,7 +70,6 @@ export default function PinnedNote({
     };
 
     setIsDragging(true);
-    setShowPalette(false);
 
     onDragStateChange?.({
       isDragging: true,
@@ -64,6 +80,23 @@ export default function PinnedNote({
     });
   };
 
+  // Start resizing from the bottom-right corner grip
+  const handleResizePointerDown = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onBringToFront?.(note.id);
+
+    resizeMetaRef.current = {
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      initialWidth: liveSize.width,
+      initialHeight: liveSize.height,
+    };
+
+    setIsResizing(true);
+  };
+
+  // Drag position effect
   useEffect(() => {
     if (!isDragging) return;
 
@@ -74,11 +107,17 @@ export default function PinnedNote({
 
       const nextX = Math.max(
         8,
-        Math.min(window.innerWidth - 250, Math.round(dragMetaRef.current.initialX + dx))
+        Math.min(
+          window.innerWidth - liveSize.width - 8,
+          Math.round(dragMetaRef.current.initialX + dx)
+        )
       );
       const nextY = Math.max(
         8,
-        Math.min(window.innerHeight - 250, Math.round(dragMetaRef.current.initialY + dy))
+        Math.min(
+          window.innerHeight - liveSize.height - 8,
+          Math.round(dragMetaRef.current.initialY + dy)
+        )
       );
 
       setLivePos({ x: nextX, y: nextY });
@@ -100,11 +139,17 @@ export default function PinnedNote({
 
       const finalX = Math.max(
         8,
-        Math.min(window.innerWidth - 250, Math.round(dragMetaRef.current.initialX + dx))
+        Math.min(
+          window.innerWidth - liveSize.width - 8,
+          Math.round(dragMetaRef.current.initialX + dx)
+        )
       );
       const finalY = Math.max(
         8,
-        Math.min(window.innerHeight - 250, Math.round(dragMetaRef.current.initialY + dy))
+        Math.min(
+          window.innerHeight - liveSize.height - 8,
+          Math.round(dragMetaRef.current.initialY + dy)
+        )
       );
 
       const dropStatus = onDragStateChange?.({
@@ -119,7 +164,6 @@ export default function PinnedNote({
       setIsOverTrashLocal(false);
 
       if (dropStatus?.droppedInTrash) {
-        // Animate shrinking and being sucked into the bottom-right trash dock
         setIsBeingDeleted(true);
         setTimeout(() => {
           onDelete?.(note.id);
@@ -139,7 +183,44 @@ export default function PinnedNote({
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
-  }, [isDragging, note.id, onUpdate, onDelete, onDragStateChange]);
+  }, [isDragging, note.id, liveSize.width, liveSize.height, onUpdate, onDelete, onDragStateChange]);
+
+  // Resize effect (clamped between 210px default/min and 340px max)
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handlePointerMove = (e) => {
+      if (!resizeMetaRef.current) return;
+      const dx = e.clientX - resizeMetaRef.current.startClientX;
+      const dy = e.clientY - resizeMetaRef.current.startClientY;
+
+      const nextWidth = clampNoteSize(resizeMetaRef.current.initialWidth + dx);
+      const nextHeight = clampNoteSize(resizeMetaRef.current.initialHeight + dy);
+
+      setLiveSize({ width: nextWidth, height: nextHeight });
+    };
+
+    const handlePointerUp = (e) => {
+      if (!resizeMetaRef.current) return;
+      const dx = e.clientX - resizeMetaRef.current.startClientX;
+      const dy = e.clientY - resizeMetaRef.current.startClientY;
+
+      const finalWidth = clampNoteSize(resizeMetaRef.current.initialWidth + dx);
+      const finalHeight = clampNoteSize(resizeMetaRef.current.initialHeight + dy);
+
+      setLiveSize({ width: finalWidth, height: finalHeight });
+      onUpdate?.(note.id, { width: finalWidth, height: finalHeight });
+      setIsResizing(false);
+      resizeMetaRef.current = null;
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [isResizing, note.id, onUpdate]);
 
   return (
     <motion.div
@@ -162,7 +243,7 @@ export default function PinnedNote({
               x: livePos.x,
               y: livePos.y,
               scale: isDragging ? (isOverTrashLocal ? 0.86 : 1.05) : 1,
-              rotate: isDragging ? (isOverTrashLocal ? 12 : 0) : note.rotation || 0,
+              rotate: isDragging || isResizing ? (isOverTrashLocal ? 12 : 0) : note.rotation || 0,
               opacity: isOverTrashLocal ? 0.85 : 1,
             }
       }
@@ -181,19 +262,21 @@ export default function PinnedNote({
             }
       }
       style={{
-        zIndex: isDragging ? 9999 : note.zIndex || 20,
+        zIndex: isDragging || isResizing ? 9999 : note.zIndex || 20,
         left: 0,
         top: 0,
+        width: liveSize.width,
+        height: liveSize.height,
       }}
-      className={`fixed w-64 h-64 rounded-3xl ${theme.bodyBg} ${theme.border} border-2 paper-texture flex flex-col justify-between select-none transition-colors duration-200 ${
+      className={`fixed rounded-3xl ${theme.bodyBg} ${theme.border} border-2 paper-texture flex flex-col justify-between select-none transition-colors duration-200 ${
         isDragging
           ? "shadow-[0_28px_60px_-12px_rgba(0,0,0,0.42)] cursor-grabbing ring-2 ring-black/10"
           : "shadow-[0_14px_28px_-6px_rgba(0,0,0,0.26)] cursor-grab hover:shadow-[0_18px_36px_-8px_rgba(0,0,0,0.32)]"
       }`}
     >
-      {/* Top Adhesive Strip */}
+      {/* Top Adhesive Strip (Right-side color picker removed for clean look) */}
       <div
-        className={`h-10 w-full rounded-t-[22px] ${theme.stripBg} border-b ${theme.border} px-3.5 flex items-center justify-between transition-colors duration-200`}
+        className={`h-9 w-full rounded-t-[22px] ${theme.stripBg} border-b ${theme.border} px-3 flex items-center justify-between transition-colors duration-200`}
       >
         <div className="flex items-center gap-1.5">
           <GripHorizontal className={`w-4 h-4 ${theme.subText} opacity-75`} />
@@ -202,61 +285,28 @@ export default function PinnedNote({
           </span>
         </div>
 
-        {/* Color Picker Toggle Button */}
-        <div className="relative" data-no-drag="true">
-          <button
-            type="button"
-            title="Kağıt Rengini Değiştir"
-            onClick={() => setShowPalette((prev) => !prev)}
-            className={`p-1.5 rounded-full ${theme.accentBg} ${theme.text} hover:brightness-95 active:scale-95 transition cursor-pointer`}
-          >
-            <Palette className="w-3.5 h-3.5" />
-          </button>
-
-          {showPalette && (
-            <div
-              data-no-drag="true"
-              className="absolute right-0 top-8 z-50 flex items-center gap-1.5 bg-neutral-900/95 px-2.5 py-1.5 rounded-2xl shadow-xl border border-white/15"
-            >
-              {COLOR_LIST.map((c) => {
-                const active = c.id === note.color;
-                return (
-                  <button
-                    key={c.id}
-                    type="button"
-                    title={c.label}
-                    onClick={() => {
-                      onUpdate?.(note.id, { color: c.id });
-                      setShowPalette(false);
-                    }}
-                    className={`w-4.5 h-4.5 rounded-full ${c.swatch} flex items-center justify-center transition-transform cursor-pointer ${
-                      active ? "scale-120 ring-2 ring-white" : "hover:scale-110 opacity-90"
-                    }`}
-                  >
-                    {active && <Check className="w-2.5 h-2.5 text-neutral-900 stroke-[3]" />}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        {isResizing && (
+          <span className={`text-[10px] font-semibold ${theme.subText} opacity-80`}>
+            {liveSize.width}×{liveSize.height}
+          </span>
+        )}
       </div>
 
       {/* Editable Note Content */}
-      <div className="flex-1 p-3.5 pb-2 flex flex-col" data-no-drag="true">
+      <div className="flex-1 p-3 pb-1.5 flex flex-col" data-no-drag="true">
         <textarea
           value={note.text}
           onFocus={() => onBringToFront?.(note.id)}
           onChange={(e) => onUpdate?.(note.id, { text: e.target.value })}
           placeholder="Not yazmak için tıklayın..."
-          className={`w-full h-full resize-none bg-transparent border-0 outline-none ${theme.text} ${theme.placeholder} text-[14.5px] leading-relaxed font-medium postit-scroll select-text`}
+          className={`w-full h-full resize-none bg-transparent border-0 outline-none ${theme.text} ${theme.placeholder} text-[13.5px] leading-relaxed font-medium postit-scroll select-text`}
         />
       </div>
 
-      {/* Bottom Quick Color Dots & Subtle Fold Corner */}
+      {/* Bottom Bar: Left Color Dots & Right Resize Handle (No color label text) */}
       <div
         data-no-drag="true"
-        className="px-3.5 pb-3 pt-1 flex items-center justify-between"
+        className="px-3 pb-2.5 pt-1 flex items-center justify-between"
       >
         <div className="flex items-center gap-1.5">
           {COLOR_LIST.map((c) => {
@@ -277,9 +327,22 @@ export default function PinnedNote({
           })}
         </div>
 
-        <span className={`text-[10px] font-medium ${theme.subText} opacity-65`}>
-          {theme.label}
-        </span>
+        {/* Subtle Diagonal Corner Resize Handle (210px min/default -> 340px max) */}
+        <div
+          data-no-drag="true"
+          onPointerDown={handleResizePointerDown}
+          title={`Boyutlandır (${NOTE_SIZE_LIMITS.MIN}px – ${NOTE_SIZE_LIMITS.MAX}px)`}
+          className="w-5 h-5 -mr-1 -mb-1 flex items-end justify-end p-1 cursor-nwse-resize opacity-45 hover:opacity-90 transition-opacity"
+        >
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 10 10"
+            className={`${theme.subText} fill-current`}
+          >
+            <path d="M9 1L1 9M9 5L5 9M9 8.5L8.5 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </div>
       </div>
     </motion.div>
   );

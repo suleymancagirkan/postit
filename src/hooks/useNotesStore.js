@@ -1,6 +1,20 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
+export const NOTE_SIZE_LIMITS = {
+  MIN: 210,
+  MAX: 340,
+  DEFAULT: 210,
+};
+
+export function clampNoteSize(value) {
+  const num = Number(value) || NOTE_SIZE_LIMITS.DEFAULT;
+  return Math.max(
+    NOTE_SIZE_LIMITS.MIN,
+    Math.min(NOTE_SIZE_LIMITS.MAX, Math.round(num))
+  );
+}
+
 export const POSTIT_COLORS = {
   yellow: {
     id: "yellow",
@@ -160,7 +174,13 @@ export function useNotesStore() {
       }
 
       if (mounted) {
-        const validNotes = Array.isArray(loadedNotes) ? loadedNotes : [];
+        const validNotes = Array.isArray(loadedNotes)
+          ? loadedNotes.map((n) => ({
+              ...n,
+              width: clampNoteSize(n.width),
+              height: clampNoteSize(n.height),
+            }))
+          : [];
         const maxZ = validNotes.reduce(
           (acc, item) => Math.max(acc, Number(item.zIndex) || 10),
           10
@@ -223,8 +243,9 @@ export function useNotesStore() {
     ({ x, y, text, color }) => {
       highestZRef.current += 1;
       const now = Date.now();
-      const clampedX = Math.max(16, Math.min(window.innerWidth - 260, Math.round(x)));
-      const clampedY = Math.max(16, Math.min(window.innerHeight - 260, Math.round(y)));
+      const size = NOTE_SIZE_LIMITS.DEFAULT;
+      const clampedX = Math.max(16, Math.min(window.innerWidth - size - 16, Math.round(x)));
+      const clampedY = Math.max(16, Math.min(window.innerHeight - size - 16, Math.round(y)));
 
       const newNote = {
         id: `note_${now}_${Math.random().toString(36).slice(2, 7)}`,
@@ -234,6 +255,8 @@ export function useNotesStore() {
           : "yellow",
         x: clampedX,
         y: clampedY,
+        width: size,
+        height: size,
         rotation: pickNaturalAngle(notes.length + Math.floor(Math.random() * 6)),
         zIndex: highestZRef.current,
         createdAt: now,
@@ -249,15 +272,23 @@ export function useNotesStore() {
 
   const updateNote = useCallback((id, patch) => {
     setNotes((prev) =>
-      prev.map((note) =>
-        note.id === id
-          ? {
-              ...note,
-              ...(typeof patch === "function" ? patch(note) : patch),
-              updatedAt: Date.now(),
-            }
-          : note
-      )
+      prev.map((note) => {
+        if (note.id !== id) return note;
+        const resolved = typeof patch === "function" ? patch(note) : patch;
+        return {
+          ...note,
+          ...resolved,
+          width:
+            resolved.width !== undefined
+              ? clampNoteSize(resolved.width)
+              : clampNoteSize(note.width),
+          height:
+            resolved.height !== undefined
+              ? clampNoteSize(resolved.height)
+              : clampNoteSize(note.height),
+          updatedAt: Date.now(),
+        };
+      })
     );
   }, []);
 
