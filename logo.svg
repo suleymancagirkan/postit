@@ -1,0 +1,82 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- 2.5D Post-it Alt Gölgesi -->
+    <filter id="cardDropShadow" x="32" y="32" width="448" height="464" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+      <feOffset dy="14"/>
+      <feComposite in2="hardAlpha" operator="out"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.839216 0 0 0 0 0.752941 0 0 0 0 0.184314 0 0 0 1 0"/>
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha2"/>
+      <feOffset dy="28"/>
+      <feGaussianBlur stdDeviation="18"/>
+      <feComposite in2="hardAlpha2" operator="out"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.0666667 0 0 0 0 0.0666667 0 0 0 0 0.0745098 0 0 0 0.18 0"/>
+      <feBlend mode="normal" in2="effect1_dropShadow" result="effect2_dropShadow"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect2_dropShadow" result="shape"/>
+    </filter>
+
+    <!-- 2.5D Kırmızı Raptiye Gölgesi -->
+    <filter id="pinShadow" x="190" y="36" width="132" height="140" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+      <feOffset dy="10"/>
+      <feGaussianBlur stdDeviation="8"/>
+      <feComposite in2="hardAlpha" operator="out"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.55 0 0 0 0 0.06 0 0 0 0 0.06 0 0 0 0.42 0"/>
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow" result="shape"/>
+    </filter>
+
+    <!-- 2.5D Kırmızı Raptiye Radyal Gradyanı -->
+    <radialGradient id="pushpinGrad" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(242 74) rotate(52) scale(64)">
+      <stop offset="0%" stop-color="#FF9494"/>
+      <stop offset="38%" stop-color="#EF4444"/>
+      <stop offset="76%" stop-color="#DC2626"/>
+      <stop offset="100%" stop-color="#991B1B"/>
+    </radialGradient>
+
+    <!-- Kağıt Gövde Hafif Işık Gradyanı -->
+    <linearGradient id="paperBodyGrad" x1="256" y1="64" x2="256" y2="436" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFF587"/>
+      <stop offset="100%" stop-color="#FFF066"/>
+    </linearGradient>
+
+    <!-- Üst Yapışkan Şerit Clip -->
+    <clipPath id="cardClip">
+      <rect x="68" y="64" width="376" height="372" rx="96"/>
+    </clipPath>
+  </defs>
+
+  <!-- Ana 2.5D Sarı Post-it Kart Gövdesi -->
+  <g filter="url(#cardDropShadow)">
+    <g clip-path="url(#cardClip)">
+      <!-- Gövde (#FFF275) -->
+      <rect x="68" y="64" width="376" height="372" rx="96" fill="url(#paperBodyGrad)"/>
+
+      <!-- Üst Yapışkan Şerit (#F4E04D) -->
+      <rect x="68" y="64" width="376" height="112" fill="#F4E04D"/>
+      <line x1="68" y1="176" x2="444" y2="176" stroke="#E5CF38" stroke-width="6"/>
+
+      <!-- Minimal İçerik Çizgileri (İsteğe Bağlı İkonik Detay) -->
+      <rect x="132" y="242" width="184" height="22" rx="11" fill="#18181B" fill-opacity="0.72"/>
+      <rect x="132" y="292" width="132" height="22" rx="11" fill="#18181B" fill-opacity="0.38"/>
+    </g>
+
+    <!-- Dış Kenarlık (#E5CF38) -->
+    <rect x="72" y="68" width="368" height="364" rx="92" stroke="#E5CF38" stroke-width="8"/>
+    <!-- İç Üst Parlama -->
+    <rect x="78" y="74" width="356" height="352" rx="86" stroke="#FFFFFF" stroke-opacity="0.55" stroke-width="4"/>
+  </g>
+
+  <!-- Üst Ortadaki 2.5D Kırmızı Raptiye -->
+  <g filter="url(#pinShadow)">
+    <!-- Çelik İğne Gölgesi -->
+    <rect x="252" y="122" width="8" height="18" rx="4" fill="#7F1D1D" fill-opacity="0.55"/>
+    <!-- Kırmızı Plastik Raptiye Başı -->
+    <circle cx="256" cy="92" r="38" fill="url(#pushpinGrad)"/>
+    <!-- Raptiye Üst Parlama -->
+    <ellipse cx="243" cy="78" rx="13" ry="8" transform="rotate(-24 243 78)" fill="#FFFFFF" fill-opacity="0.55"/>
+  </g>
+</svg>
