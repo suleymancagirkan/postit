@@ -480,6 +480,8 @@ struct StoredNoteRecord {
     #[serde(default)]
     pinned_target: Option<serde_json::Value>,
     #[serde(default)]
+    linked_ids: Vec<String>,
+    #[serde(default)]
     created_at: i64,
     #[serde(default)]
     updated_at: i64,
@@ -528,11 +530,14 @@ fn open_notes_db(app: &AppHandle) -> Result<Connection, String> {
              z_index INTEGER NOT NULL DEFAULT 10,
              in_basket INTEGER NOT NULL DEFAULT 0,
              pinned_target_json TEXT,
+             linked_ids_json TEXT,
              created_at INTEGER NOT NULL DEFAULT 0,
              updated_at INTEGER NOT NULL DEFAULT 0,
              sort_order INTEGER NOT NULL DEFAULT 0
          );",
     );
+    // Ensure existing postit.db tables get the linked_ids_json column smoothly
+    let _ = conn.execute("ALTER TABLE notes ADD COLUMN linked_ids_json TEXT", []);
 
     Ok(conn)
 }
@@ -550,8 +555,8 @@ fn write_notes_to_sqlite(conn: &mut Connection, notes: &[StoredNoteRecord]) -> R
             .prepare(
                 "INSERT INTO notes (
                     id, text, color, x, y, width, height, rotation,
-                    z_index, in_basket, pinned_target_json, created_at, updated_at, sort_order
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                    z_index, in_basket, pinned_target_json, linked_ids_json, created_at, updated_at, sort_order
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             )
             .map_err(|e| format!("Failed to prepare SQLite insert: {}", e))?;
 
@@ -560,6 +565,7 @@ fn write_notes_to_sqlite(conn: &mut Connection, notes: &[StoredNoteRecord]) -> R
                 .pinned_target
                 .as_ref()
                 .and_then(|v| if v.is_null() { None } else { serde_json::to_string(v).ok() });
+            let linked_json = serde_json::to_string(&n.linked_ids).unwrap_or_else(|_| "[]".to_string());
 
             stmt.execute(params![
                 n.id,
@@ -573,6 +579,7 @@ fn write_notes_to_sqlite(conn: &mut Connection, notes: &[StoredNoteRecord]) -> R
                 n.z_index,
                 if n.in_basket { 1i64 } else { 0i64 },
                 pinned_json,
+                linked_json,
                 n.created_at,
                 n.updated_at,
                 idx as i64
@@ -595,7 +602,7 @@ fn load_notes(app: AppHandle) -> Result<String, String> {
         let mut stmt = conn
             .prepare(
                 "SELECT id, text, color, x, y, width, height, rotation,
-                        z_index, in_basket, pinned_target_json, created_at, updated_at
+                        z_index, in_basket, pinned_target_json, linked_ids_json, created_at, updated_at
                  FROM notes
                  ORDER BY sort_order ASC, created_at ASC",
             )
@@ -607,6 +614,11 @@ fn load_notes(app: AppHandle) -> Result<String, String> {
                 let pinned_target = pinned_raw
                     .as_deref()
                     .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+                let linked_raw: Option<String> = row.get(11).ok().flatten();
+                let linked_ids = linked_raw
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+                    .unwrap_or_default();
                 let in_basket_int: i64 = row.get(9)?;
 
                 Ok(StoredNoteRecord {
@@ -621,8 +633,9 @@ fn load_notes(app: AppHandle) -> Result<String, String> {
                     z_index: row.get(8)?,
                     in_basket: in_basket_int != 0,
                     pinned_target,
-                    created_at: row.get(11)?,
-                    updated_at: row.get(12)?,
+                    linked_ids,
+                    created_at: row.get(12)?,
+                    updated_at: row.get(13)?,
                 })
             })
             .map_err(|e| format!("Failed to map SQLite rows: {}", e))?;

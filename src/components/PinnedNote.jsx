@@ -124,7 +124,9 @@ function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
   return (
     <div className="group relative flex flex-col items-center select-none z-50">
       <div className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-neutral-900/95 px-2 py-0.5 text-[10px] font-medium text-white opacity-0 shadow-md transition-opacity duration-150 group-hover:opacity-100 z-50">
-        {isPinned ? `📌 ${targetLabel} (Çıkarmak için tıkla)` : "Bu ekrana sapla"}
+        {isPinned
+          ? `📌 ${targetLabel} (Tıkla: Çıkar • Sürükle: İp Bağla)`
+          : "Tıkla: Sabitle • Sürükle: Ajan İpi Bağla"}
       </div>
 
       {/* Contact / Floating Shadow on the Paper */}
@@ -334,8 +336,11 @@ function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
 export default function PinnedNote({
   note,
   isVisibleOnScreen = true,
+  isStringTargetHighlighted = false,
   onUpdate,
   onToggleScreenPin,
+  onStartStringDrag,
+  onLivePositionChange,
   onStashToBasket,
   onDelete,
   onBringToFront,
@@ -436,12 +441,39 @@ export default function PinnedNote({
     setIsResizing(true);
   };
 
-  const handleCenterPinClick = async (e) => {
+  const handleCenterPinPointerDown = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    setPinPulse(true);
-    setTimeout(() => setPinPulse(false), 320);
-    await onToggleScreenPin?.(note);
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let startedStringDrag = false;
+
+    const handleMove = (moveEvent) => {
+      const dist = Math.hypot(
+        moveEvent.clientX - startX,
+        moveEvent.clientY - startY
+      );
+      if (!startedStringDrag && dist >= 7) {
+        startedStringDrag = true;
+        onStartStringDrag?.(note, moveEvent.clientX, moveEvent.clientY);
+      }
+    };
+
+    const handleUp = async () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+
+      if (!startedStringDrag) {
+        // Simple click -> toggle screen pin as usual
+        setPinPulse(true);
+        setTimeout(() => setPinPulse(false), 320);
+        await onToggleScreenPin?.(note);
+      }
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
   };
 
   // Drag position effect
@@ -469,6 +501,12 @@ export default function PinnedNote({
       );
 
       setLivePos({ x: nextX, y: nextY });
+      onLivePositionChange?.(note.id, {
+        x: nextX,
+        y: nextY,
+        width: liveSize.width,
+        height: liveSize.height,
+      });
 
       const status = onDragStateChange?.({
         isDragging: true,
@@ -511,12 +549,14 @@ export default function PinnedNote({
       });
 
       if (dropStatus?.droppedInTrash) {
+        onLivePositionChange?.(note.id, null);
         // Keep isOverTrashLocal true so the paper stays crumpled as a ball while dropping into the open trash mouth
         setIsBeingDeleted(true);
         setTimeout(() => {
           onDelete?.(note.id);
         }, 280);
       } else if (dropStatus?.droppedInBasket) {
+        onLivePositionChange?.(note.id, null);
         setIsOverTrashLocal(false);
         setIsOverBasketLocal(false);
         setIsBeingStashed(true);
@@ -526,6 +566,7 @@ export default function PinnedNote({
           onStashToBasket?.(note.id);
         }, 240);
       } else {
+        onLivePositionChange?.(note.id, null);
         setIsOverTrashLocal(false);
         setIsOverBasketLocal(false);
         setLivePos({ x: finalX, y: finalY });
@@ -672,7 +713,9 @@ export default function PinnedNote({
         clipPath: isCrumpled ? CRUMPLED_CLIP_PATH : "none",
       }}
       className={`fixed overflow-visible rounded-3xl ${theme.bodyBg} ${theme.border} border-2 paper-texture flex flex-col justify-between select-none transition-colors duration-200 ${
-        isDragging
+        isStringTargetHighlighted
+          ? "ring-4 ring-red-500/80 shadow-[0_24px_55px_-10px_rgba(220,38,38,0.45)]"
+          : isDragging
           ? "shadow-[0_28px_60px_-12px_rgba(0,0,0,0.45)] cursor-grabbing ring-2 ring-black/10"
           : "shadow-[0_14px_28px_-6px_rgba(0,0,0,0.26)] cursor-grab hover:shadow-[0_18px_36px_-8px_rgba(0,0,0,0.32)]"
       }`}
@@ -685,7 +728,7 @@ export default function PinnedNote({
         <button
           type="button"
           data-no-drag="true"
-          onClick={handleCenterPinClick}
+          onPointerDown={handleCenterPinPointerDown}
           className="absolute -top-4 left-1/2 -translate-x-1/2 z-50 bg-transparent border-0 p-0 outline-none cursor-pointer overflow-visible"
         >
           <RealisticThumbtack

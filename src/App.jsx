@@ -6,6 +6,9 @@ import StickyStack from "./components/StickyStack";
 import PinnedNote from "./components/PinnedNote";
 import TrashDock, { isPointInTrashZone } from "./components/TrashDock";
 import BasketDock, { isPointInBasketZone } from "./components/BasketDock";
+import AgentStringsLayer, {
+  getNoteThumbtackAnchor,
+} from "./components/AgentStringsLayer";
 import { useNotesStore, clampNoteSize } from "./hooks/useNotesStore";
 import "./App.css";
 
@@ -26,6 +29,8 @@ export default function App() {
     toggleNoteScreenPin,
     bringToFront,
     deleteNote,
+    toggleNoteLink,
+    removeNoteLink,
     stashNoteToBasket,
     restoreNoteFromBasket,
     stashAllNotesToBasket,
@@ -35,7 +40,7 @@ export default function App() {
   // Minimizing only hides the StickyStack; active notes remain on screen
   const [isStackMinimized, setIsStackMinimized] = useState(false);
 
-  // Basket is hidden by default unless dragging a note or summoned via Tray ("Sepeti Getir") for 25s
+  // Basket is hidden by default unless dragging a note or summoned via Tray / Edge Bar for 25s
   const [isBasketSummoned, setIsBasketSummoned] = useState(false);
   const basketTimerRef = useRef(null);
 
@@ -47,6 +52,15 @@ export default function App() {
     noteId: null,
   });
 
+  // Live 60fps positions of notes currently being dragged so connected red strings follow smoothly
+  const [livePositionsMap, setLivePositionsMap] = useState({});
+
+  // Active detective red string drag state (when dragging from a note's thumbtack to another note)
+  const [activeStringDrag, setActiveStringDrag] = useState(null);
+
+  // Timestamps of recently tied/plucked string pairs for damped harmonic guitar-string vibration
+  const [pluckTimestampMap, setPluckTimestampMap] = useState({});
+
   const [visibilityMap, setVisibilityMap] = useState({});
 
   const isDraggingRef = useRef(false);
@@ -55,16 +69,19 @@ export default function App() {
   const activeNotes = notes.filter((n) => !n.inBasket);
   const basketNotes = notes.filter((n) => Boolean(n.inBasket));
 
-  const summonBasketTemporarily = useCallback((durationMs = BASKET_SUMMON_DURATION_MS) => {
-    setIsBasketSummoned(true);
-    if (basketTimerRef.current) {
-      clearTimeout(basketTimerRef.current);
-    }
-    basketTimerRef.current = setTimeout(() => {
-      setIsBasketSummoned(false);
-      basketTimerRef.current = null;
-    }, durationMs);
-  }, []);
+  const summonBasketTemporarily = useCallback(
+    (durationMs = BASKET_SUMMON_DURATION_MS) => {
+      setIsBasketSummoned(true);
+      if (basketTimerRef.current) {
+        clearTimeout(basketTimerRef.current);
+      }
+      basketTimerRef.current = setTimeout(() => {
+        setIsBasketSummoned(false);
+        basketTimerRef.current = null;
+      }, durationMs);
+    },
+    []
+  );
 
   const dismissBasket = useCallback(() => {
     setIsBasketSummoned(false);
@@ -129,7 +146,6 @@ export default function App() {
       }
     };
 
-    // Direct global bridge called by Rust WebviewWindow::eval
     window.__postitTrayAction = handleTrayAction;
 
     if (!isTauriRuntime()) {
@@ -170,7 +186,9 @@ export default function App() {
     let cancelled = false;
 
     const checkPinnedVisibility = async () => {
-      const pinnedNotes = notes.filter((n) => !n.inBasket && Boolean(n.pinnedTarget));
+      const pinnedNotes = notes.filter(
+        (n) => !n.inBasket && Boolean(n.pinnedTarget)
+      );
       if (pinnedNotes.length === 0) {
         if (!cancelled) setVisibilityMap({});
         return;
@@ -269,7 +287,6 @@ export default function App() {
   const handleRestoreNoteFromBasket = useCallback(
     (noteId, clearPin = false) => {
       restoreNoteFromBasket(noteId, clearPin);
-      // Keep the 25s timer alive while user is pulling notes out, or hide if last note was taken out
       if (basketNotes.length <= 1) {
         setIsBasketSummoned(false);
         if (basketTimerRef.current) {
@@ -282,6 +299,148 @@ export default function App() {
     },
     [restoreNoteFromBasket, basketNotes.length, summonBasketTemporarily]
   );
+
+  // Update live 60fps coordinates of a dragged note and trigger a subtle string vibration on drop
+  const handleLivePositionChange = useCallback(
+    (noteId, posOrNull) => {
+      setLivePositionsMap((prev) => {
+        if (!posOrNull) {
+          if (!(noteId in prev)) return prev;
+          const next = { ...prev };
+          delete next[noteId];
+          return next;
+        }
+        return { ...prev, [noteId]: posOrNull };
+      });
+
+      // When a note finishes dragging, pluck all strings attached to it
+      if (!posOrNull) {
+        const movedNote = notes.find((n) => n.id === noteId);
+        if (
+          movedNote &&
+          Array.isArray(movedNote.linkedIds) &&
+          movedNote.linkedIds.length > 0
+        ) {
+          const ts = performance.now();
+          setPluckTimestampMap((prev) => {
+            const next = { ...prev };
+            for (const targetId of movedNote.linkedIds) {
+              const pairKey =
+                noteId < targetId
+                  ? `${noteId}__${targetId}`
+                  : `${targetId}__${noteId}`;
+              next[pairKey] = ts;
+            }
+            return next;
+          });
+        }
+      }
+    },
+    [notes]
+  );
+
+  // Start pulling a red detective string from a note's thumbtack
+  const handleStartStringDrag = useCallback(
+    (sourceNote, initialClientX, initialClientY) => {
+      isDraggingRef.current = true;
+      applyIgnoreCursorEvents(false);
+      const startAnchor = getNoteThumbtackAnchor(sourceNote, livePositionsMap);
+
+      setActiveStringDrag({
+        sourceId: sourceNote.id,
+        startX: startAnchor.x,
+        startY: startAnchor.y,
+        currentX: initialClientX,
+        currentY: initialClientY,
+        targetId: null,
+        snapTargetAnchor: null,
+      });
+    },
+    [applyIgnoreCursorEvents, livePositionsMap]
+  );
+
+  // Track active detective string drag and snap magnetically to target note thumbtacks
+  useEffect(() => {
+    if (!activeStringDrag) return;
+
+    const findTargetNoteAtPoint = (clientX, clientY) => {
+      for (const candidate of activeNotes) {
+        if (candidate.id === activeStringDrag.sourceId) continue;
+        const isVis = candidate.pinnedTarget
+          ? visibilityMap[candidate.id] !== false
+          : true;
+        if (!isVis) continue;
+
+        const w = clampNoteSize(candidate.width);
+        const h = clampNoteSize(candidate.height);
+        // Check if cursor is inside the target card or near its top thumbtack
+        if (
+          clientX >= candidate.x - 16 &&
+          clientX <= candidate.x + w + 16 &&
+          clientY >= candidate.y - 28 &&
+          clientY <= candidate.y + h + 12
+        ) {
+          return candidate;
+        }
+      }
+      return null;
+    };
+
+    const handleMove = (e) => {
+      const target = findTargetNoteAtPoint(e.clientX, e.clientY);
+      const snapAnchor = target
+        ? getNoteThumbtackAnchor(target, livePositionsMap)
+        : null;
+
+      setActiveStringDrag((prev) =>
+        prev
+          ? {
+              ...prev,
+              currentX: e.clientX,
+              currentY: e.clientY,
+              targetId: target ? target.id : null,
+              snapTargetAnchor: snapAnchor,
+            }
+          : null
+      );
+    };
+
+    const handleUp = (e) => {
+      const target = findTargetNoteAtPoint(e.clientX, e.clientY);
+      if (target) {
+        const sourceId = activeStringDrag.sourceId;
+        const targetId = target.id;
+        toggleNoteLink(sourceId, targetId);
+
+        const pairKey =
+          sourceId < targetId
+            ? `${sourceId}__${targetId}`
+            : `${targetId}__${sourceId}`;
+        setPluckTimestampMap((prev) => ({
+          ...prev,
+          [pairKey]: performance.now(),
+        }));
+      }
+
+      isDraggingRef.current = false;
+      setActiveStringDrag(null);
+      setTimeout(syncInteractiveRegions, 50);
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+    };
+  }, [
+    activeStringDrag,
+    activeNotes,
+    visibilityMap,
+    livePositionsMap,
+    toggleNoteLink,
+    syncInteractiveRegions,
+  ]);
 
   const handleDragStateChange = useCallback(
     ({ isDragging, source, noteId = null, clientX, clientY, isDrop = false }) => {
@@ -353,8 +512,11 @@ export default function App() {
             key={note.id}
             note={note}
             isVisibleOnScreen={isVisibleOnScreen}
+            isStringTargetHighlighted={activeStringDrag?.targetId === note.id}
             onUpdate={updateNote}
             onToggleScreenPin={toggleNoteScreenPin}
+            onStartStringDrag={handleStartStringDrag}
+            onLivePositionChange={handleLivePositionChange}
             onStashToBasket={stashNoteToBasket}
             onDelete={deleteNote}
             onBringToFront={bringToFront}
@@ -365,7 +527,19 @@ export default function App() {
         );
       })}
 
-      {/* 3. 2.5D Storage Basket (Visible while dragging, pulled from right-edge magnetic bar, or summoned via Tray for 25s) */}
+      {/* 3. 2.5D Detective Red Yarn Strings Layer between connected Post-it thumbtacks */}
+      <AgentStringsLayer
+        notes={activeNotes}
+        visibilityMap={visibilityMap}
+        livePositionsMap={livePositionsMap}
+        activeStringDrag={activeStringDrag}
+        pluckTimestampMap={pluckTimestampMap}
+        onCutString={removeNoteLink}
+        onInteractiveEnter={handleInteractiveEnter}
+        onInteractiveLeave={handleInteractiveLeave}
+      />
+
+      {/* 4. 2.5D Storage Basket */}
       <BasketDock
         isVisible={dragState.isDragging || isBasketSummoned}
         isOverBasket={dragState.isOverBasket}
@@ -377,7 +551,7 @@ export default function App() {
         onInteractiveLeave={handleInteractiveLeave}
       />
 
-      {/* 4. 2.5D Metallic Trash Can (Only visible while dragging a note) */}
+      {/* 5. 2.5D Metallic Trash Can */}
       <TrashDock
         isVisible={dragState.isDragging}
         isOverTrash={dragState.isOverTrash}

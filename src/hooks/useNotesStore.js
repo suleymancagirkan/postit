@@ -181,6 +181,7 @@ export function useNotesStore() {
               height: clampNoteSize(n.height),
               pinnedTarget: n.pinnedTarget || null,
               inBasket: Boolean(n.inBasket),
+              linkedIds: Array.isArray(n.linkedIds) ? n.linkedIds : [],
             }))
           : [];
         const maxZ = validNotes.reduce(
@@ -261,6 +262,7 @@ export function useNotesStore() {
         height: size,
         pinnedTarget: null,
         inBasket: Boolean(inBasket),
+        linkedIds: [],
         rotation: pickNaturalAngle(notes.length + Math.floor(Math.random() * 6)),
         zIndex: highestZRef.current,
         createdAt: now,
@@ -356,7 +358,73 @@ export function useNotesStore() {
   }, []);
 
   const deleteNote = useCallback((id) => {
-    setNotes((prev) => prev.filter((note) => note.id !== id));
+    setNotes((prev) =>
+      prev
+        .filter((note) => note.id !== id)
+        .map((note) =>
+          Array.isArray(note.linkedIds) && note.linkedIds.includes(id)
+            ? {
+                ...note,
+                linkedIds: note.linkedIds.filter((lid) => lid !== id),
+              }
+            : note
+        )
+    );
+  }, []);
+
+  // Connect or disconnect two notes with a red detective string between their thumbtacks
+  const toggleNoteLink = useCallback((sourceId, targetId) => {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    const now = Date.now();
+    setNotes((prev) => {
+      const source = prev.find((n) => n.id === sourceId);
+      if (!source) return prev;
+      const alreadyLinked =
+        Array.isArray(source.linkedIds) && source.linkedIds.includes(targetId);
+
+      return prev.map((note) => {
+        const currentLinks = Array.isArray(note.linkedIds) ? note.linkedIds : [];
+        if (note.id === sourceId) {
+          const nextLinks = alreadyLinked
+            ? currentLinks.filter((id) => id !== targetId)
+            : [...new Set([...currentLinks, targetId])];
+          return { ...note, linkedIds: nextLinks, updatedAt: now };
+        }
+        if (note.id === targetId) {
+          const nextLinks = alreadyLinked
+            ? currentLinks.filter((id) => id !== sourceId)
+            : [...new Set([...currentLinks, sourceId])];
+          return { ...note, linkedIds: nextLinks, updatedAt: now };
+        }
+        return note;
+      });
+    });
+  }, []);
+
+  // Cut/remove a specific detective string link between two notes
+  const removeNoteLink = useCallback((sourceId, targetId) => {
+    if (!sourceId || !targetId) return;
+    const now = Date.now();
+    setNotes((prev) =>
+      prev.map((note) => {
+        const currentLinks = Array.isArray(note.linkedIds) ? note.linkedIds : [];
+        if (note.id === sourceId && currentLinks.includes(targetId)) {
+          return {
+            ...note,
+            linkedIds: currentLinks.filter((id) => id !== targetId),
+            updatedAt: now,
+          };
+        }
+        if (note.id === targetId && currentLinks.includes(sourceId)) {
+          return {
+            ...note,
+            linkedIds: currentLinks.filter((id) => id !== sourceId),
+            updatedAt: now,
+          };
+        }
+        return note;
+      })
+    );
   }, []);
 
   // Move a single note into the storage basket (optionally clearing its screen pin)
@@ -439,6 +507,8 @@ export function useNotesStore() {
     toggleNoteScreenPin,
     bringToFront,
     deleteNote,
+    toggleNoteLink,
+    removeNoteLink,
     stashNoteToBasket,
     restoreNoteFromBasket,
     stashAllNotesToBasket,
