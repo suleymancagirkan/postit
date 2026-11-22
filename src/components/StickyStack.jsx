@@ -453,12 +453,12 @@ export default function StickyStack({
             </div>
 
             {/* Live Markdown Editor Body */}
-            <div className="flex-1 p-3 pb-1.5 flex flex-col overflow-hidden" data-no-drag="true">
+            <div className="flex-1 p-3 pb-1.5 flex flex-col overflow-hidden cursor-text" data-no-drag="true">
               <MarkdownEditor
                 resetKey={draft.sheetId}
                 value={draft.text}
                 onChange={(html) => onUpdateDraft({ text: html })}
-                placeholder="Notunuzu yazın (**kalın**, *italik*, ~~çizili~~) ve çekip koparın..."
+                placeholder="Notunuzu yazın ([] todo, **kalın**, *italik*) ve çekip koparın..."
                 textClass={activeTheme.text}
                 placeholderClass={activeTheme.placeholder}
               />

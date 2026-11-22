@@ -718,7 +718,7 @@ export default function PinnedNote({
           filter: isCrumpled ? "blur(0.4px)" : "none",
           transition: "transform 180ms ease, filter 180ms ease",
         }}
-        className="flex-1 p-3 pb-1.5 flex flex-col overflow-hidden"
+        className="flex-1 p-3 pb-1.5 flex flex-col overflow-hidden cursor-text"
         data-no-drag="true"
       >
         <MarkdownEditor
@@ -726,7 +726,7 @@ export default function PinnedNote({
           value={note.text}
           onFocus={() => onBringToFront?.(note.id)}
           onChange={(html) => onUpdate?.(note.id, { text: html })}
-          placeholder="Not yazın (**kalın**, *italik*, ~~çizili~~)..."
+          placeholder="Not yazın ([] todo, **kalın**, *italik*)..."
           textClass={theme.text}
           placeholderClass={theme.placeholder}
         />
