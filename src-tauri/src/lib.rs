@@ -834,6 +834,18 @@ pub fn run() {
     let is_ignoring_bg = Arc::clone(&is_ignoring);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // If user launches the app again while it's already running,
+            // focus the existing instance and reveal the Post-it Stack instead of opening a duplicate!
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.set_skip_taskbar(true);
+                let _ = win.show();
+                let _ = win.unminimize();
+                let _ = win.eval(
+                    "if (window.__postitTrayAction) { window.__postitTrayAction('show_stack'); }",
+                );
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .manage(HitTestState {
             regions,
