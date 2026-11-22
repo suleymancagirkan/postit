@@ -7,6 +7,7 @@ import {
   NOTE_SIZE_LIMITS,
   clampNoteSize,
 } from "../hooks/useNotesStore";
+import MarkdownEditor from "./MarkdownEditor";
 
 /**
  * 2.5D Red-Headed & Grey-Metallic Push-Pin (Raptiye) SVG Component
@@ -544,14 +545,16 @@ export default function PinnedNote({
         )}
       </div>
 
-      {/* Editable Note Content */}
-      <div className="flex-1 p-3 pb-1.5 flex flex-col" data-no-drag="true">
-        <textarea
+      {/* Editable Live Markdown Note Content */}
+      <div className="flex-1 p-3 pb-1.5 flex flex-col overflow-hidden" data-no-drag="true">
+        <MarkdownEditor
+          resetKey={note.id}
           value={note.text}
           onFocus={() => onBringToFront?.(note.id)}
-          onChange={(e) => onUpdate?.(note.id, { text: e.target.value })}
-          placeholder="Not yazmak için tıklayın..."
-          className={`w-full h-full resize-none bg-transparent border-0 outline-none ${theme.text} ${theme.placeholder} text-[13.5px] leading-relaxed font-medium postit-scroll select-text`}
+          onChange={(html) => onUpdate?.(note.id, { text: html })}
+          placeholder="Not yazın (**kalın**, *italik*, ~~çizili~~)..."
+          textClass={theme.text}
+          placeholderClass={theme.placeholder}
         />
       </div>
 

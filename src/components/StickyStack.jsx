@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles, ArrowUpRight, GripHorizontal, Layers, Magnet } from "lucide-react";
 import { POSTIT_COLORS, COLOR_LIST, NOTE_SIZE_LIMITS } from "../hooks/useNotesStore";
+import MarkdownEditor from "./MarkdownEditor";
 
 const STACK_ORIGIN = { x: 36, y: 36 };
 // Magnetic pull break distance: inside this radius the sheet resists like a magnet;
@@ -348,14 +349,15 @@ export default function StickyStack({
               </div>
             </div>
 
-            {/* Textarea Body */}
-            <div className="flex-1 p-3 pb-1.5 flex flex-col" data-no-drag="true">
-              <textarea
-                ref={textareaRef}
+            {/* Live Markdown Editor Body */}
+            <div className="flex-1 p-3 pb-1.5 flex flex-col overflow-hidden" data-no-drag="true">
+              <MarkdownEditor
+                resetKey={draft.sheetId}
                 value={draft.text}
-                onChange={(e) => onUpdateDraft({ text: e.target.value })}
-                placeholder="Notunuzu yazıp kağıdı desteden çekerek koparın..."
-                className={`w-full h-full resize-none bg-transparent border-0 outline-none ${activeTheme.text} ${activeTheme.placeholder} text-[13.5px] leading-relaxed font-medium postit-scroll select-text`}
+                onChange={(html) => onUpdateDraft({ text: html })}
+                placeholder="Notunuzu yazın (**kalın**, *italik*, ~~çizili~~) ve çekip koparın..."
+                textClass={activeTheme.text}
+                placeholderClass={activeTheme.placeholder}
               />
             </div>
 
