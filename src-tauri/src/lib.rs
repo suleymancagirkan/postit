@@ -1,3 +1,4 @@
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -454,31 +455,209 @@ mod win32_tracker {
     }
 }
 
-fn get_notes_file_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredNoteRecord {
+    id: String,
+    #[serde(default)]
+    text: String,
+    #[serde(default = "default_color")]
+    color: String,
+    #[serde(default)]
+    x: i64,
+    #[serde(default)]
+    y: i64,
+    #[serde(default = "default_size")]
+    width: i64,
+    #[serde(default = "default_size")]
+    height: i64,
+    #[serde(default)]
+    rotation: f64,
+    #[serde(default)]
+    z_index: i64,
+    #[serde(default)]
+    in_basket: bool,
+    #[serde(default)]
+    pinned_target: Option<serde_json::Value>,
+    #[serde(default)]
+    created_at: i64,
+    #[serde(default)]
+    updated_at: i64,
+}
+
+fn default_color() -> String {
+    "yellow".to_string()
+}
+
+fn default_size() -> i64 {
+    210
+}
+
+fn get_postit_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let base_dir = app
         .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to resolve app_data_dir: {}", e))?;
-    if !dir.exists() {
-        fs::create_dir_all(&dir)
-            .map_err(|e| format!("Failed to create app_data_dir: {}", e))?;
+        .data_dir()
+        .or_else(|_| app.path().app_data_dir())
+        .map_err(|e| format!("Failed to resolve data_dir: {}", e))?;
+    let postit_dir = base_dir.join("postit");
+    if !postit_dir.exists() {
+        fs::create_dir_all(&postit_dir)
+            .map_err(|e| format!("Failed to create postit directory: {}", e))?;
     }
-    Ok(dir.join("notes.json"))
+    Ok(postit_dir)
+}
+
+fn open_notes_db(app: &AppHandle) -> Result<Connection, String> {
+    let dir = get_postit_data_dir(app)?;
+    let db_path = dir.join("postit.db");
+    let conn = Connection::open(&db_path)
+        .map_err(|e| format!("Failed to open SQLite database at {:?}: {}", db_path, e))?;
+
+    let _ = conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA synchronous = NORMAL;
+         CREATE TABLE IF NOT EXISTS notes (
+             id TEXT PRIMARY KEY,
+             text TEXT NOT NULL DEFAULT '',
+             color TEXT NOT NULL DEFAULT 'yellow',
+             x INTEGER NOT NULL DEFAULT 100,
+             y INTEGER NOT NULL DEFAULT 100,
+             width INTEGER NOT NULL DEFAULT 210,
+             height INTEGER NOT NULL DEFAULT 210,
+             rotation REAL NOT NULL DEFAULT 0.0,
+             z_index INTEGER NOT NULL DEFAULT 10,
+             in_basket INTEGER NOT NULL DEFAULT 0,
+             pinned_target_json TEXT,
+             created_at INTEGER NOT NULL DEFAULT 0,
+             updated_at INTEGER NOT NULL DEFAULT 0,
+             sort_order INTEGER NOT NULL DEFAULT 0
+         );",
+    );
+
+    Ok(conn)
+}
+
+fn write_notes_to_sqlite(conn: &mut Connection, notes: &[StoredNoteRecord]) -> Result<(), String> {
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("Failed to start SQLite transaction: {}", e))?;
+
+    tx.execute("DELETE FROM notes", [])
+        .map_err(|e| format!("Failed to clear notes table: {}", e))?;
+
+    {
+        let mut stmt = tx
+            .prepare(
+                "INSERT INTO notes (
+                    id, text, color, x, y, width, height, rotation,
+                    z_index, in_basket, pinned_target_json, created_at, updated_at, sort_order
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            )
+            .map_err(|e| format!("Failed to prepare SQLite insert: {}", e))?;
+
+        for (idx, n) in notes.iter().enumerate() {
+            let pinned_json = n
+                .pinned_target
+                .as_ref()
+                .and_then(|v| if v.is_null() { None } else { serde_json::to_string(v).ok() });
+
+            stmt.execute(params![
+                n.id,
+                n.text,
+                n.color,
+                n.x,
+                n.y,
+                n.width,
+                n.height,
+                n.rotation,
+                n.z_index,
+                if n.in_basket { 1i64 } else { 0i64 },
+                pinned_json,
+                n.created_at,
+                n.updated_at,
+                idx as i64
+            ])
+            .map_err(|e| format!("Failed to insert note {}: {}", n.id, e))?;
+        }
+    }
+
+    tx.commit()
+        .map_err(|e| format!("Failed to commit SQLite transaction: {}", e))?;
+    Ok(())
 }
 
 #[tauri::command]
 fn load_notes(app: AppHandle) -> Result<String, String> {
-    let path = get_notes_file_path(&app)?;
-    if !path.exists() {
-        return Ok("[]".to_string());
+    let mut conn = open_notes_db(&app)?;
+
+    let mut notes = Vec::<StoredNoteRecord>::new();
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, text, color, x, y, width, height, rotation,
+                        z_index, in_basket, pinned_target_json, created_at, updated_at
+                 FROM notes
+                 ORDER BY sort_order ASC, created_at ASC",
+            )
+            .map_err(|e| format!("Failed to query notes from SQLite: {}", e))?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                let pinned_raw: Option<String> = row.get(10)?;
+                let pinned_target = pinned_raw
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+                let in_basket_int: i64 = row.get(9)?;
+
+                Ok(StoredNoteRecord {
+                    id: row.get(0)?,
+                    text: row.get(1)?,
+                    color: row.get(2)?,
+                    x: row.get(3)?,
+                    y: row.get(4)?,
+                    width: row.get(5)?,
+                    height: row.get(6)?,
+                    rotation: row.get(7)?,
+                    z_index: row.get(8)?,
+                    in_basket: in_basket_int != 0,
+                    pinned_target,
+                    created_at: row.get(11)?,
+                    updated_at: row.get(12)?,
+                })
+            })
+            .map_err(|e| format!("Failed to map SQLite rows: {}", e))?;
+
+        for r in rows.flatten() {
+            notes.push(r);
+        }
     }
-    fs::read_to_string(&path).map_err(|e| format!("Failed to read notes.json: {}", e))
+
+    // One-time automatic migration if SQLite is empty and an older notes.json exists
+    if notes.is_empty() {
+        if let Ok(legacy_dir) = app.path().app_data_dir() {
+            let legacy_json_path = legacy_dir.join("notes.json");
+            if legacy_json_path.exists() {
+                if let Ok(raw) = fs::read_to_string(&legacy_json_path) {
+                    if let Ok(migrated) = serde_json::from_str::<Vec<StoredNoteRecord>>(&raw) {
+                        if !migrated.is_empty() {
+                            let _ = write_notes_to_sqlite(&mut conn, &migrated);
+                            notes = migrated;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    serde_json::to_string(&notes).map_err(|e| format!("Failed to serialize loaded notes: {}", e))
 }
 
 #[tauri::command]
 fn save_notes(app: AppHandle, notes_json: String) -> Result<(), String> {
-    let path = get_notes_file_path(&app)?;
-    fs::write(&path, notes_json).map_err(|e| format!("Failed to write notes.json: {}", e))
+    let parsed: Vec<StoredNoteRecord> = serde_json::from_str(&notes_json)
+        .map_err(|e| format!("Failed to parse notes payload: {}", e))?;
+    let mut conn = open_notes_db(&app)?;
+    write_notes_to_sqlite(&mut conn, &parsed)
 }
 
 #[tauri::command]
