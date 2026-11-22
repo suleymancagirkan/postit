@@ -401,19 +401,32 @@ function tryApplyLiveMarkdown() {
 
   if (cleanBefore === "# " || cleanBefore === "## ") {
     const isH1 = cleanBefore === "# ";
-    anchorNode.nodeValue = "";
-    const headingSpan = document.createElement("span");
-    headingSpan.className = isH1
-      ? "text-[16.5px] font-extrabold tracking-tight block leading-snug"
-      : "text-[14.5px] font-bold tracking-tight block leading-snug";
+    const headingEl = document.createElement("div");
+    headingEl.setAttribute("data-heading", isH1 ? "h1" : "h2");
+    headingEl.className = isH1
+      ? "text-[16.5px] font-extrabold tracking-tight leading-snug my-0.5"
+      : "text-[14.5px] font-bold tracking-tight leading-snug my-0.5";
     const innerText = document.createTextNode("\u200B" + afterRaw);
-    headingSpan.appendChild(innerText);
+    headingEl.appendChild(innerText);
 
     const parent = anchorNode.parentNode;
-    if (anchorNode.nextSibling) {
-      parent.insertBefore(headingSpan, anchorNode.nextSibling);
+    if (
+      parent &&
+      parent.nodeName === "DIV" &&
+      !parent.hasAttribute("contenteditable") &&
+      parent.childNodes.length === 1
+    ) {
+      parent.parentNode.replaceChild(headingEl, parent);
     } else {
-      parent.appendChild(headingSpan);
+      anchorNode.nodeValue = "";
+      if (anchorNode.nextSibling) {
+        parent.insertBefore(headingEl, anchorNode.nextSibling);
+      } else {
+        parent.appendChild(headingEl);
+      }
+      if (anchorNode.nodeValue === "") {
+        parent.removeChild(anchorNode);
+      }
     }
 
     const range = document.createRange();
@@ -574,6 +587,88 @@ export default function MarkdownEditor({
         ? anchorNode
         : anchorNode?.parentElement;
     const todoRow = currentElement?.closest?.('[data-todo-item="true"]');
+    const headingEl = currentElement?.closest?.('[data-heading]');
+
+    // Pressing Enter inside a Heading (# / ##) always breaks out to a fresh normal plain-text line!
+    if (e.key === "Enter" && !e.shiftKey && headingEl) {
+      e.preventDefault();
+      const parent = headingEl.parentNode;
+      if (!parent) return;
+
+      const normalLine = document.createElement("div");
+      const normalText = document.createTextNode("\u200B");
+      normalLine.appendChild(normalText);
+
+      if (headingEl.nextSibling) {
+        parent.insertBefore(normalLine, headingEl.nextSibling);
+      } else {
+        parent.appendChild(normalLine);
+      }
+
+      const range = document.createRange();
+      range.setStart(normalText, 1);
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      emitCurrentHtml();
+      return;
+    }
+
+    // Pressing Backspace at the very start of a Heading converts it back to normal plain text
+    if (e.key === "Backspace" && sel.isCollapsed && headingEl) {
+      const rawText = (headingEl.textContent || "").replace(/\u200B/g, "");
+      const beforeCursor = (anchorNode?.nodeValue || "")
+        .slice(0, sel.anchorOffset)
+        .replace(/\u200B/g, "");
+      if (rawText.length === 0 || beforeCursor.length === 0) {
+        e.preventDefault();
+        const parent = headingEl.parentNode;
+        if (!parent) return;
+        const normalLine = document.createElement("div");
+        const normalText = document.createTextNode("\u200B" + rawText);
+        normalLine.appendChild(normalText);
+        parent.replaceChild(normalLine, headingEl);
+
+        const range = document.createRange();
+        range.setStart(normalText, 1);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        emitCurrentHtml();
+        return;
+      }
+    }
+
+    // Pressing Enter inside an inline formatting tag (<strong>, <em>, <del>, <code>, <mark>) breaks out to a plain-text line
+    const inlineStyledEl = currentElement?.closest?.("strong, em, del, code, mark");
+    if (e.key === "Enter" && !e.shiftKey && inlineStyledEl && !todoRow) {
+      e.preventDefault();
+      const editorEl = editorRef.current;
+      if (!editorEl) return;
+
+      const normalLine = document.createElement("div");
+      const normalText = document.createTextNode("\u200B");
+      normalLine.appendChild(normalText);
+
+      // Insert right after the block containing inlineStyledEl (or directly inside editor)
+      let topBlock = inlineStyledEl;
+      while (topBlock.parentNode && topBlock.parentNode !== editorEl) {
+        topBlock = topBlock.parentNode;
+      }
+      if (topBlock.nextSibling) {
+        editorEl.insertBefore(normalLine, topBlock.nextSibling);
+      } else {
+        editorEl.appendChild(normalLine);
+      }
+
+      const range = document.createRange();
+      range.setStart(normalText, 1);
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      emitCurrentHtml();
+      return;
+    }
 
     // Handle Enter inside a Todo item: continue with a new Todo, or exit Todo mode if current item is empty
     if (e.key === "Enter" && !e.shiftKey && todoRow) {
