@@ -66,10 +66,12 @@ export default function App() {
     }, durationMs);
   }, []);
 
-  useEffect(() => {
-    return () => {
-      if (basketTimerRef.current) clearTimeout(basketTimerRef.current);
-    };
+  const dismissBasket = useCallback(() => {
+    setIsBasketSummoned(false);
+    if (basketTimerRef.current) {
+      clearTimeout(basketTimerRef.current);
+      basketTimerRef.current = null;
+    }
   }, []);
 
   const applyIgnoreCursorEvents = useCallback(async (ignore) => {
@@ -347,6 +349,7 @@ export default function App() {
         basketNotes={basketNotes}
         onRestoreNote={handleRestoreNoteFromBasket}
         onSummonBasket={() => summonBasketTemporarily(BASKET_SUMMON_DURATION_MS)}
+        onDismissBasket={dismissBasket}
         onInteractiveEnter={handleInteractiveEnter}
         onInteractiveLeave={handleInteractiveLeave}
       />

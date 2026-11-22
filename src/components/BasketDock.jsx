@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 
 export const BASKET_ZONE_RADIUS = 145;
 const EDGE_MAGNET_THRESHOLD = 68;
+const DISMISS_PUSH_THRESHOLD = 44;
 
 export function getBasketTargetCenter() {
   if (typeof window === "undefined") return { x: 1200, y: 500 };
@@ -40,6 +41,7 @@ export default function BasketDock({
   basketNotes = [],
   onRestoreNote,
   onSummonBasket,
+  onDismissBasket,
   onInteractiveEnter,
   onInteractiveLeave,
 }) {
@@ -47,6 +49,12 @@ export default function BasketDock({
   const [pullLeftPx, setPullLeftPx] = useState(0);
   const pullStartXRef = useRef(null);
   const hasSnappedOpenRef = useRef(false);
+
+  // Dragging the open basket rightwards toward the edge to dismiss it
+  const [isPushingBasket, setIsPushingBasket] = useState(false);
+  const [pushRightPx, setPushRightPx] = useState(0);
+  const basketDragStartRef = useRef(null);
+  const didPushDragRef = useRef(false);
 
   // Magnetic tension (0 -> 1) while pulling the right-edge handle to the left
   const pullTension = isPullingBar
@@ -113,14 +121,63 @@ export default function BasketDock({
     { x: 36, y: 9, rotate: -2 },
   ];
 
-  // Clicking the basket itself pops out the most recently stashed note directly onto the screen
+  // Clicking the basket itself (without dragging right) pops out the most recently stashed note
   const handleBasketClick = (e) => {
     e.stopPropagation();
+    if (didPushDragRef.current) {
+      didPushDragRef.current = false;
+      return;
+    }
     if (basketNotes.length > 0) {
       const topNote = basketNotes[basketNotes.length - 1];
       onRestoreNote?.(topNote.id, false);
     }
   };
+
+  const handleBasketPointerDown = (e) => {
+    if (!isVisible) return;
+    e.stopPropagation();
+    basketDragStartRef.current = { x: e.clientX, y: e.clientY };
+    didPushDragRef.current = false;
+    setIsPushingBasket(true);
+    setPushRightPx(0);
+  };
+
+  useEffect(() => {
+    if (!isPushingBasket) return;
+
+    const handlePointerMove = (e) => {
+      if (!basketDragStartRef.current) return;
+      const dx = e.clientX - basketDragStartRef.current.x;
+      const dy = e.clientY - basketDragStartRef.current.y;
+      if (Math.hypot(dx, dy) > 6) {
+        didPushDragRef.current = true;
+      }
+
+      const deltaRight = Math.max(0, dx);
+      setPushRightPx(deltaRight);
+
+      if (deltaRight >= DISMISS_PUSH_THRESHOLD) {
+        setIsPushingBasket(false);
+        setPushRightPx(0);
+        basketDragStartRef.current = null;
+        onDismissBasket?.();
+      }
+    };
+
+    const handlePointerUp = () => {
+      setIsPushingBasket(false);
+      setPushRightPx(0);
+      basketDragStartRef.current = null;
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [isPushingBasket, onDismissBasket]);
 
   return (
     <>
@@ -161,15 +218,30 @@ export default function BasketDock({
             data-interactive="true"
             onMouseEnter={onInteractiveEnter}
             onMouseLeave={onInteractiveLeave}
+            onPointerDown={handleBasketPointerDown}
             onClick={handleBasketClick}
             initial={{ x: 145, opacity: 0, scale: 0.65, rotate: 22 }}
             animate={
               isVisible
                 ? {
-                    x: isOverBasket ? -12 : 0,
-                    opacity: 1,
-                    scale: isOverBasket ? 1.12 : 1,
-                    rotate: isOverBasket ? -4 : 0,
+                    x: isPushingBasket
+                      ? pushRightPx * 0.85
+                      : isOverBasket
+                      ? -12
+                      : 0,
+                    opacity: isPushingBasket
+                      ? Math.max(0.35, 1 - pushRightPx / (DISMISS_PUSH_THRESHOLD * 1.3))
+                      : 1,
+                    scale: isOverBasket
+                      ? 1.12
+                      : isPushingBasket
+                      ? Math.max(0.82, 1 - pushRightPx * 0.003)
+                      : 1,
+                    rotate: isPushingBasket
+                      ? pushRightPx * 0.25
+                      : isOverBasket
+                      ? -4
+                      : 0,
                   }
                 : {
                     // Magnetic peek preview while pulling the right-edge bar
