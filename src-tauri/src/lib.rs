@@ -801,6 +801,13 @@ pub fn run() {
                 true,
                 None::<&str>,
             )?;
+            let toggle_clock_item = MenuItem::with_id(
+                app,
+                "toggle_clock",
+                "Masa Saatini Göster / Gizle",
+                true,
+                None::<&str>,
+            )?;
             let show_basket_item = MenuItem::with_id(
                 app,
                 "show_basket",
@@ -837,6 +844,7 @@ pub fn run() {
                 app,
                 &[
                     &toggle_stack_item,
+                    &toggle_clock_item,
                     &show_basket_item,
                     &sep1,
                     &stash_keep_pins_item,

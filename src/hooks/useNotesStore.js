@@ -426,15 +426,17 @@ export function useNotesStore() {
     });
   }, []);
 
-  // Connect or disconnect two notes with a red detective string between their thumbtacks
+  // Connect or disconnect two notes (or a note and __desk_clock__) with a red detective string
   const toggleNoteLink = useCallback((sourceId, targetId) => {
-    if (!sourceId || !targetId || sourceId === targetId) return;
+    if (!sourceId || !targetId || sourceId === targetId) return false;
     const now = Date.now();
+    let added = false;
     setNotes((prev) => {
       const source = prev.find((n) => n.id === sourceId);
       if (!source) return prev;
       const alreadyLinked =
         Array.isArray(source.linkedIds) && source.linkedIds.includes(targetId);
+      added = !alreadyLinked;
 
       return prev.map((note) => {
         const currentLinks = Array.isArray(note.linkedIds) ? note.linkedIds : [];
@@ -453,6 +455,7 @@ export function useNotesStore() {
         return note;
       });
     });
+    return added;
   }, []);
 
   // Cut/remove a specific detective string link between two notes

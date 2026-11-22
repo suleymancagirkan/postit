@@ -337,6 +337,7 @@ export default function PinnedNote({
   note,
   isVisibleOnScreen = true,
   isStringTargetHighlighted = false,
+  isClockAlarmRinging = false,
   clusterEffect = null, // "hover-trash" | "dropping-trash" | "hover-basket" | "dropping-basket" | null
   onUpdate,
   onToggleScreenPin,
@@ -641,7 +642,8 @@ export default function PinnedNote({
     };
   }, [isResizing, note.id, onUpdate]);
 
-  const actuallyVisible = isVisibleOnScreen || isDragging || isResizing;
+  const actuallyVisible =
+    isVisibleOnScreen || isDragging || isResizing || isClockAlarmRinging;
 
   return (
     <motion.div
@@ -676,6 +678,14 @@ export default function PinnedNote({
               rotate: note.rotation || 0,
               opacity: 0,
             }
+          : isClockAlarmRinging && !isDragging
+          ? {
+              x: [livePos.x - 4, livePos.x + 4, livePos.x - 4, livePos.x + 4, livePos.x],
+              y: [livePos.y, livePos.y - 4, livePos.y, livePos.y - 4, livePos.y],
+              scale: 1.04,
+              rotate: [-3, 3, -3, 3, note.rotation || 0],
+              opacity: 1,
+            }
           : {
               x: livePos.x,
               y: livePos.y,
@@ -707,7 +717,9 @@ export default function PinnedNote({
             }
       }
       transition={
-        isDragging
+        isClockAlarmRinging && !isDragging
+          ? { duration: 0.42, repeat: Infinity }
+          : isDragging
           ? {
               x: { type: "tween", duration: 0 },
               y: { type: "tween", duration: 0 },
@@ -721,7 +733,10 @@ export default function PinnedNote({
             }
       }
       style={{
-        zIndex: isDragging || isResizing ? 9999 : note.zIndex || 20,
+        zIndex:
+          isDragging || isResizing || isClockAlarmRinging
+            ? 9999
+            : note.zIndex || 20,
         left: 0,
         top: 0,
         width: liveSize.width,
@@ -730,7 +745,9 @@ export default function PinnedNote({
         clipPath: isCrumpled ? CRUMPLED_CLIP_PATH : "none",
       }}
       className={`fixed overflow-visible rounded-3xl ${theme.bodyBg} ${theme.border} border-2 paper-texture flex flex-col justify-between select-none transition-colors duration-200 ${
-        isStringTargetHighlighted
+        isClockAlarmRinging
+          ? "ring-4 ring-amber-400 shadow-[0_24px_55px_-8px_rgba(245,158,11,0.65)]"
+          : isStringTargetHighlighted
           ? "ring-4 ring-red-500/80 shadow-[0_24px_55px_-10px_rgba(220,38,38,0.45)]"
           : isDragging
           ? "shadow-[0_28px_60px_-12px_rgba(0,0,0,0.45)] cursor-grabbing ring-2 ring-black/10"

@@ -9,6 +9,12 @@ import BasketDock, { isPointInBasketZone } from "./components/BasketDock";
 import AgentStringsLayer, {
   getNoteThumbtackAnchor,
 } from "./components/AgentStringsLayer";
+import DeskClockWidget, {
+  DESK_CLOCK_ID,
+  DESK_CLOCK_SIZE,
+  getDefaultClockPosition,
+  getClockThumbtackAnchor,
+} from "./components/DeskClockWidget";
 import {
   useNotesStore,
   clampNoteSize,
@@ -17,6 +23,7 @@ import {
 import "./App.css";
 
 const BASKET_SUMMON_DURATION_MS = 25000;
+const STORAGE_KEY_CLOCK_POS = "postit_desktop_clock_pos_v1";
 
 function isTauriRuntime() {
   return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
@@ -43,6 +50,25 @@ export default function App() {
 
   // Minimizing only hides the StickyStack; active notes remain on screen
   const [isStackMinimized, setIsStackMinimized] = useState(false);
+
+  // 2.5D Desktop Table Clock plugin state (lives on Desktop, toggleable from System Tray)
+  const [isClockEnabled, setIsClockEnabled] = useState(true);
+  const [isClockAlarmRinging, setIsClockAlarmRinging] = useState(false);
+  const [externalTimerRequest, setExternalTimerRequest] = useState(null);
+  const [clockPos, setClockPos] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_CLOCK_POS);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (typeof parsed.x === "number" && typeof parsed.y === "number") {
+          return parsed;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return getDefaultClockPosition();
+  });
 
   // Basket is hidden by default unless dragging a note or summoned via Tray / Edge Bar for 25s
   const [isBasketSummoned, setIsBasketSummoned] = useState(false);
@@ -139,6 +165,8 @@ export default function App() {
         setIsStackMinimized((prev) => !prev);
       } else if (action === "show_stack") {
         setIsStackMinimized(false);
+      } else if (action === "toggle_clock") {
+        setIsClockEnabled((prev) => !prev);
       } else if (action === "show_basket") {
         summonBasketTemporarily(BASKET_SUMMON_DURATION_MS);
       } else if (action === "stash_all_keep_pins") {
@@ -196,10 +224,6 @@ export default function App() {
       const pinnedNotes = notes.filter(
         (n) => !n.inBasket && Boolean(n.pinnedTarget)
       );
-      if (pinnedNotes.length === 0) {
-        if (!cancelled) setVisibilityMap({});
-        return;
-      }
 
       const queries = pinnedNotes.map((n) => {
         const w = clampNoteSize(n.width);
@@ -213,6 +237,23 @@ export default function App() {
           processName: n.pinnedTarget.processName || "",
         };
       });
+
+      // The 2.5D Desk Clock is pinned to the Desktop ("desktop") so it stays on the wallpaper
+      if (isClockEnabled) {
+        queries.push({
+          id: DESK_CLOCK_ID,
+          centerX: clockPos.x + DESK_CLOCK_SIZE.width / 2,
+          centerY: clockPos.y + DESK_CLOCK_SIZE.height / 2,
+          targetType: "desktop",
+          hwnd: 0,
+          processName: "desktop",
+        });
+      }
+
+      if (queries.length === 0) {
+        if (!cancelled) setVisibilityMap({});
+        return;
+      }
 
       try {
         const results = await invoke("check_notes_visibility", { queries });
@@ -240,7 +281,7 @@ export default function App() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [notes]);
+  }, [notes, isClockEnabled, clockPos.x, clockPos.y]);
 
   useEffect(() => {
     syncInteractiveRegions();
@@ -393,6 +434,20 @@ export default function App() {
     if (!activeStringDrag) return;
 
     const findTargetNoteAtPoint = (clientX, clientY) => {
+      // Check if cursor is over the 2.5D Desk Clock plugin
+      const isClockVis =
+        isClockEnabled &&
+        (visibilityMap[DESK_CLOCK_ID] !== false || isClockAlarmRinging);
+      if (
+        isClockVis &&
+        clientX >= clockPos.x - 12 &&
+        clientX <= clockPos.x + DESK_CLOCK_SIZE.width + 12 &&
+        clientY >= clockPos.y - 12 &&
+        clientY <= clockPos.y + DESK_CLOCK_SIZE.height + 12
+      ) {
+        return { id: DESK_CLOCK_ID };
+      }
+
       for (const candidate of activeNotes) {
         if (candidate.id === activeStringDrag.sourceId) continue;
         const isVis = candidate.pinnedTarget
@@ -418,7 +473,9 @@ export default function App() {
     const handleMove = (e) => {
       const target = findTargetNoteAtPoint(e.clientX, e.clientY);
       const snapAnchor = target
-        ? getNoteThumbtackAnchor(target, livePositionsMap)
+        ? target.id === DESK_CLOCK_ID
+          ? getClockThumbtackAnchor(clockPos)
+          : getNoteThumbtackAnchor(target, livePositionsMap, clockPos)
         : null;
 
       setActiveStringDrag((prev) =>
@@ -467,6 +524,9 @@ export default function App() {
     activeNotes,
     visibilityMap,
     livePositionsMap,
+    isClockEnabled,
+    isClockAlarmRinging,
+    clockPos,
     toggleNoteLink,
     syncInteractiveRegions,
   ]);
@@ -533,6 +593,28 @@ export default function App() {
       ? getConnectedClusterIds(notes, dragState.noteId)
       : null;
 
+  const isClockVisibleOnDesktop =
+    isClockEnabled &&
+    (visibilityMap[DESK_CLOCK_ID] !== false || isClockAlarmRinging);
+
+  // Notes tied to the Desk Clock (directly or via string cluster) vibrate when the clock alarm rings
+  const clockLinkedClusterIds = isClockAlarmRinging
+    ? (() => {
+        const set = new Set();
+        for (const n of activeNotes) {
+          if (Array.isArray(n.linkedIds) && n.linkedIds.includes(DESK_CLOCK_ID)) {
+            const cluster = getConnectedClusterIds(activeNotes, n.id);
+            cluster.forEach((cid) => set.add(cid));
+          }
+        }
+        return set;
+      })()
+    : null;
+
+  const clockDirectLinksCount = activeNotes.filter(
+    (n) => Array.isArray(n.linkedIds) && n.linkedIds.includes(DESK_CLOCK_ID)
+  ).length;
+
   return (
     <main className="relative w-screen h-screen bg-transparent overflow-hidden select-none">
       {/* 1. Post-it Stack in the corner */}
@@ -547,6 +629,21 @@ export default function App() {
           onInteractiveEnter={handleInteractiveEnter}
           onInteractiveLeave={handleInteractiveLeave}
           pinnedCount={activeNotes.length}
+        />
+      )}
+
+      {/* 1.5. 2.5D Twin-Bell Desktop Table Clock & Timer Plugin (Lives on Desktop) */}
+      {isClockEnabled && (
+        <DeskClockWidget
+          clockPos={clockPos}
+          onClockPosChange={setClockPos}
+          isVisibleOnDesktop={isClockVisibleOnDesktop}
+          isStringTargetHighlighted={activeStringDrag?.targetId === DESK_CLOCK_ID}
+          linkedNoteCount={clockDirectLinksCount}
+          externalTimerRequest={externalTimerRequest}
+          onAlarmStateChange={setIsClockAlarmRinging}
+          onInteractiveEnter={handleInteractiveEnter}
+          onInteractiveLeave={handleInteractiveLeave}
         />
       )}
 
@@ -576,12 +673,17 @@ export default function App() {
           }
         }
 
+        const isNoteAlarmRinging = Boolean(
+          clockLinkedClusterIds && clockLinkedClusterIds.has(note.id)
+        );
+
         return (
           <PinnedNote
             key={note.id}
             note={note}
             isVisibleOnScreen={isVisibleOnScreen}
             isStringTargetHighlighted={activeStringDrag?.targetId === note.id}
+            isClockAlarmRinging={isNoteAlarmRinging}
             clusterEffect={clusterEffect}
             onUpdate={updateNote}
             onToggleScreenPin={toggleNoteScreenPin}
@@ -597,11 +699,13 @@ export default function App() {
         );
       })}
 
-      {/* 3. 2.5D Detective Red Yarn Strings Layer between connected Post-it thumbtacks */}
+      {/* 3. 2.5D Detective Red Yarn Strings Layer between connected Post-it thumbtacks (and Desk Clock) */}
       <AgentStringsLayer
         notes={activeNotes}
         visibilityMap={visibilityMap}
         livePositionsMap={livePositionsMap}
+        clockPos={clockPos}
+        isClockVisible={isClockVisibleOnDesktop}
         activeStringDrag={activeStringDrag}
         pluckTimestampMap={pluckTimestampMap}
         onCutString={removeNoteLink}

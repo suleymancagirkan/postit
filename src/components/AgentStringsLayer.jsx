@@ -1,11 +1,16 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Scissors } from "lucide-react";
 import { clampNoteSize } from "../hooks/useNotesStore";
+import { DESK_CLOCK_ID, getClockThumbtackAnchor } from "./DeskClockWidget";
 
 /**
- * Computes the exact thumbtack collar anchor point at the top-center of a Post-it card.
+ * Computes the exact thumbtack collar anchor point at the top-center of a Post-it card
+ * (or the top plunger post of the 2.5D Desk Clock if linked to DESK_CLOCK_ID).
  */
-export function getNoteThumbtackAnchor(note, livePositionsMap = {}) {
+export function getNoteThumbtackAnchor(note, livePositionsMap = {}, clockPos = null) {
+  if (note?.id === DESK_CLOCK_ID && clockPos) {
+    return getClockThumbtackAnchor(clockPos);
+  }
   const live = livePositionsMap[note.id];
   const x = live?.x !== undefined ? live.x : note.x;
   const y = live?.y !== undefined ? live.y : note.y;
@@ -54,6 +59,8 @@ export default function AgentStringsLayer({
   notes = [],
   visibilityMap = {},
   livePositionsMap = {},
+  clockPos = null,
+  isClockVisible = false,
   activeStringDrag = null,
   pluckTimestampMap = {},
   onCutString,
@@ -90,18 +97,27 @@ export default function AgentStringsLayer({
     };
   }, [pluckTimestampMap, animTick]);
 
-  // Build unique undirected pairs of visible linked notes
+  // Build unique undirected pairs of visible linked notes (and Desk Clock links)
   const noteById = new Map();
   for (const n of notes) {
     if (!n.inBasket) {
       noteById.set(n.id, n);
     }
   }
+  if (clockPos && isClockVisible) {
+    noteById.set(DESK_CLOCK_ID, {
+      id: DESK_CLOCK_ID,
+      x: clockPos.x,
+      y: clockPos.y,
+      linkedIds: [],
+    });
+  }
 
   const pairs = [];
   const seenKeys = new Set();
 
   for (const note of noteById.values()) {
+    if (note.id === DESK_CLOCK_ID) continue;
     const isSourceVisible = note.pinnedTarget
       ? visibilityMap[note.id] !== false
       : true;
@@ -112,9 +128,12 @@ export default function AgentStringsLayer({
       const target = noteById.get(targetId);
       if (!target) continue;
 
-      const isTargetVisible = target.pinnedTarget
-        ? visibilityMap[target.id] !== false
-        : true;
+      const isTargetVisible =
+        target.id === DESK_CLOCK_ID
+          ? isClockVisible
+          : target.pinnedTarget
+          ? visibilityMap[target.id] !== false
+          : true;
       if (!isTargetVisible) continue;
 
       const pairKey =
@@ -158,10 +177,10 @@ export default function AgentStringsLayer({
           </filter>
         </defs>
 
-        {/* 1. Tied Detective Strings between PinnedNotes */}
+        {/* 1. Tied Detective Strings between PinnedNotes (and Desk Clock) */}
         {pairs.map(({ pairKey, source, target }) => {
-          const p1 = getNoteThumbtackAnchor(source, livePositionsMap);
-          const p2 = getNoteThumbtackAnchor(target, livePositionsMap);
+          const p1 = getNoteThumbtackAnchor(source, livePositionsMap, clockPos);
+          const p2 = getNoteThumbtackAnchor(target, livePositionsMap, clockPos);
 
           // Compute damped harmonic guitar-string vibration if recently tied/plucked
           const pluckTs = pluckTimestampMap[pairKey] || 0;
@@ -305,8 +324,8 @@ export default function AgentStringsLayer({
 
       {/* 3. Interactive Midpoint Scissor Buttons to Cut any Tied String */}
       {pairs.map(({ pairKey, source, target }) => {
-        const p1 = getNoteThumbtackAnchor(source, livePositionsMap);
-        const p2 = getNoteThumbtackAnchor(target, livePositionsMap);
+        const p1 = getNoteThumbtackAnchor(source, livePositionsMap, clockPos);
+        const p2 = getNoteThumbtackAnchor(target, livePositionsMap, clockPos);
         const { midX, midY } = buildCatenaryPath(p1.x, p1.y, p2.x, p2.y);
         const isHovered = hoveredPairKey === pairKey;
 
