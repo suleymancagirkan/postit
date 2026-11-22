@@ -283,7 +283,7 @@ function tryApplyLiveMarkdown() {
     chip.setAttribute("data-timer-expr", rawExpr);
     chip.setAttribute("contenteditable", "false");
     chip.className =
-      "inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 rounded-lg bg-neutral-900/85 text-amber-300 font-bold text-[11.5px] shadow-xs border border-amber-400/40 select-none align-baseline";
+      "inline-flex items-center gap-1 px-2 py-0.5 mx-0.5 rounded-full bg-black/12 text-inherit font-extrabold text-[11.5px] border border-black/20 shadow-2xs select-none align-baseline";
     chip.textContent = `⏰ ${rawExpr}`;
 
     const parent = anchorNode.parentNode;

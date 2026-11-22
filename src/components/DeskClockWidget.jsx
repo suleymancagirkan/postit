@@ -138,20 +138,28 @@ function buildStandByPerimeterTicks(width = 230, height = 120) {
 
 const STANDBY_TICKS = buildStandByPerimeterTicks(218, 110);
 
+// Concentric rounded-rectangle ring geometries so up to 3 simultaneous note timers
+// render as nested glowing colored rings around the StandBy clock bezel!
+const MULTI_RING_TRACKS = [
+  { x: 5.5, y: 5.5, width: 243, height: 131, rx: 31.5, perimeter: 702, strokeWidth: 4.0 },
+  { x: 10.5, y: 10.5, width: 233, height: 121, rx: 27.5, perimeter: 668, strokeWidth: 3.4 },
+  { x: 15.0, y: 15.0, width: 224, height: 112, rx: 24.0, perimeter: 636, strokeWidth: 3.0 },
+];
+
 /**
  * 2.5D iOS StandBy Mode Desktop Clock Plugin
  * - Face Mode 1 ("analog"): iOS StandBy rectangular radial analog face (Image 1)
  * - Face Mode 2 ("bubble"): iOS StandBy oversized 3D bubble digital face (Image 2)
- * - Click clock to switch between Analog and Bubble Digital faces (or silence a ringing note timer).
- * - Automatically wraps a glowing colored progress ring around the clock bezel matching
- *   the color of any Post-it note that has an active @25d or @19.20 timer!
+ * - Supports multiple simultaneous note timers: renders concentric colored rings
+ *   around the bezel (one ring per timed Post-it note, in each note's own color!)
+ *   and displays their live countdowns together.
  */
 export default function DeskClockWidget({
   clockPos,
   onClockPosChange,
   isVisibleOnDesktop = true,
   isStringTargetHighlighted = false,
-  activeTimerEntry = null, // { note, remainingMs, progress, isRinging }
+  activeTimerEntries = [], // Array of { note, remainingMs, progress, isRinging }
   onDismissRingingTimer,
   onInteractiveEnter,
   onInteractiveLeave,
@@ -231,10 +239,11 @@ export default function DeskClockWidget({
         // ignore
       }
 
-      // If it was a clean click (not a drag), either silence ringing alarm or switch between StandBy Analog & Bubble Digital
+      // If it was a clean click (not a drag), either silence ringing alarm(s) or switch between StandBy Analog & Bubble Digital
       if (!didMoveRef.current) {
-        if (activeTimerEntry?.isRinging) {
-          onDismissRingingTimer?.(activeTimerEntry.note.id);
+        const ringingEntry = activeTimerEntries.find((e) => e.isRinging);
+        if (ringingEntry) {
+          onDismissRingingTimer?.(ringingEntry.note.id);
         } else {
           setFaceMode((prev) => {
             const next = prev === "analog" ? "bubble" : "analog";
@@ -259,26 +268,18 @@ export default function DeskClockWidget({
     isDragging,
     clockPos,
     onClockPosChange,
-    activeTimerEntry,
+    activeTimerEntries,
     onDismissRingingTimer,
   ]);
 
-  const isRinging = Boolean(activeTimerEntry?.isRinging);
-  const timerNote = activeTimerEntry?.note || null;
+  const primaryTimerEntry = activeTimerEntries[0] || null;
+  const isRinging = activeTimerEntries.some((e) => e.isRinging);
+  const timerNote = primaryTimerEntry?.note || null;
   const timerTheme = timerNote
     ? POSTIT_COLORS[timerNote.color] || POSTIT_COLORS.yellow
     : null;
   const ringHex = timerTheme ? timerTheme.hex : "#FACC15";
   const ringHexSoft = timerTheme ? timerTheme.hexSoft : "#FEF08A";
-
-  // Rounded-rectangle outer perimeter length for rx=30, width=244, height=134:
-  // Straight segments = 2*(244 - 60) + 2*(134 - 60) = 368 + 148 = 516
-  // Corner arcs = 2 * pi * 30 ≈ 188.5 -> Total perimeter ≈ 704.5
-  const rectPerimeter = 704.5;
-  const progressRatio = activeTimerEntry
-    ? Math.max(0.02, Math.min(1, activeTimerEntry.progress))
-    : 0;
-  const dashOffset = rectPerimeter * (1 - progressRatio);
 
   // Clock time values
   const hours24 = now.getHours();
@@ -405,7 +406,7 @@ export default function DeskClockWidget({
             <stop offset="100%" stopColor="#09090B" />
           </linearGradient>
 
-          {/* Bubble Digital Mode Gradients (Matches Image 2 or active Post-it timer color) */}
+          {/* Bubble Digital Mode Gradients (Matches Image 2 or active Post-it timer colors!) */}
           <linearGradient
             id={`bubbleHourGrad_${uid}`}
             x1="0%"
@@ -415,11 +416,11 @@ export default function DeskClockWidget({
           >
             <stop
               offset="0%"
-              stopColor={activeTimerEntry ? ringHexSoft : "#F472B6"}
+              stopColor={primaryTimerEntry ? ringHexSoft : "#F472B6"}
             />
             <stop
               offset="100%"
-              stopColor={activeTimerEntry ? ringHex : "#DB2777"}
+              stopColor={primaryTimerEntry ? ringHex : "#DB2777"}
             />
           </linearGradient>
 
@@ -432,11 +433,23 @@ export default function DeskClockWidget({
           >
             <stop
               offset="0%"
-              stopColor={activeTimerEntry ? ringHex : "#A78BFA"}
+              stopColor={
+                activeTimerEntries[1]
+                  ? (POSTIT_COLORS[activeTimerEntries[1].note.color] || POSTIT_COLORS.yellow).hex
+                  : primaryTimerEntry
+                  ? ringHex
+                  : "#A78BFA"
+              }
             />
             <stop
               offset="100%"
-              stopColor={activeTimerEntry ? ringHexSoft : "#7C3AED"}
+              stopColor={
+                activeTimerEntries[1]
+                  ? (POSTIT_COLORS[activeTimerEntries[1].note.color] || POSTIT_COLORS.yellow).hexSoft
+                  : primaryTimerEntry
+                  ? ringHexSoft
+                  : "#7C3AED"
+              }
             />
           </linearGradient>
 
@@ -449,11 +462,23 @@ export default function DeskClockWidget({
           >
             <stop
               offset="0%"
-              stopColor={activeTimerEntry ? ringHexSoft : "#C084FC"}
+              stopColor={
+                activeTimerEntries[1]
+                  ? (POSTIT_COLORS[activeTimerEntries[1].note.color] || POSTIT_COLORS.yellow).hexSoft
+                  : primaryTimerEntry
+                  ? ringHexSoft
+                  : "#C084FC"
+              }
             />
             <stop
               offset="100%"
-              stopColor={activeTimerEntry ? ringHex : "#9333EA"}
+              stopColor={
+                activeTimerEntries[1]
+                  ? (POSTIT_COLORS[activeTimerEntries[1].note.color] || POSTIT_COLORS.yellow).hex
+                  : primaryTimerEntry
+                  ? ringHex
+                  : "#9333EA"
+              }
             />
           </linearGradient>
 
@@ -515,38 +540,44 @@ export default function DeskClockWidget({
           fill="#050507"
         />
 
-        {/* Post-it Note Color Timer Progress Ring around the StandBy Bezel! */}
-        {activeTimerEntry && (
-          <>
-            {/* Subtle background track in note's color */}
-            <rect
-              x="6"
-              y="6"
-              width="242"
-              height="130"
-              rx="31"
-              fill="none"
-              stroke={ringHex}
-              strokeOpacity="0.2"
-              strokeWidth="4"
-            />
-            {/* Glowing animated progress frame filling around the StandBy clock */}
-            <rect
-              x="6"
-              y="6"
-              width="242"
-              height="130"
-              rx="31"
-              fill="none"
-              stroke={ringHex}
-              strokeWidth={isRinging ? "5.5" : "4.2"}
-              strokeLinecap="round"
-              strokeDasharray={rectPerimeter}
-              strokeDashoffset={isRinging ? 0 : dashOffset}
-              filter={`url(#ringGlow_${uid})`}
-            />
-          </>
-        )}
+        {/* Multi-Timer Concentric Post-it Color Progress Rings around the StandBy Bezel! */}
+        {activeTimerEntries.slice(0, 3).map((entry, idx) => {
+          const track = MULTI_RING_TRACKS[idx];
+          const entryTheme =
+            POSTIT_COLORS[entry.note.color] || POSTIT_COLORS.yellow;
+          const ratio = Math.max(0.02, Math.min(1, entry.progress));
+          const offset = track.perimeter * (1 - ratio);
+
+          return (
+            <g key={entry.note.id}>
+              <rect
+                x={track.x}
+                y={track.y}
+                width={track.width}
+                height={track.height}
+                rx={track.rx}
+                fill="none"
+                stroke={entryTheme.hex}
+                strokeOpacity="0.18"
+                strokeWidth={track.strokeWidth}
+              />
+              <rect
+                x={track.x}
+                y={track.y}
+                width={track.width}
+                height={track.height}
+                rx={track.rx}
+                fill="none"
+                stroke={entryTheme.hex}
+                strokeWidth={entry.isRinging ? track.strokeWidth + 1.4 : track.strokeWidth}
+                strokeLinecap="round"
+                strokeDasharray={track.perimeter}
+                strokeDashoffset={entry.isRinging ? 0 : offset}
+                filter={`url(#ringGlow_${uid})`}
+              />
+            </g>
+          );
+        })}
 
         {/* =========================================================
             FACE MODE 1: iOS StandBy Analog Mode (Image 1)
@@ -620,28 +651,41 @@ export default function DeskClockWidget({
               9
             </text>
 
-            {/* Left Side Complication: Active @Timer Countdown / Target Time (Like ⏰ 5:30AM in Image 1) */}
-            {activeTimerEntry ? (
-              <g transform="translate(67, 72)">
-                <circle cx="4" cy="-3" r="4.2" fill={ringHex} />
-                <path
-                  d="M4 -5.2 L4 -3 L5.6 -2"
-                  stroke="#050507"
-                  strokeWidth="1.2"
-                  strokeLinecap="round"
-                />
-                <text
-                  x="11"
-                  y="0.5"
-                  fill={ringHexSoft}
-                  fontSize="9.5"
-                  fontWeight="800"
-                  fontFamily="ui-monospace, SFMono-Regular, Consolas, monospace"
-                >
-                  {isRinging
-                    ? "SÜRE DOLDU!"
-                    : formatRemainingTime(activeTimerEntry.remainingMs)}
-                </text>
+            {/* Left Side Complication: Active @Timer Countdowns (Stacks up to 2 simultaneous timers in their respective note colors!) */}
+            {activeTimerEntries.length > 0 ? (
+              <g
+                transform={`translate(66, ${
+                  activeTimerEntries.length > 1 ? 66 : 72
+                })`}
+              >
+                {activeTimerEntries.slice(0, 2).map((entry, idx) => {
+                  const tTheme =
+                    POSTIT_COLORS[entry.note.color] || POSTIT_COLORS.yellow;
+                  const yOff = idx * 12;
+                  return (
+                    <g key={entry.note.id} transform={`translate(0, ${yOff})`}>
+                      <circle cx="4" cy="-3" r="3.8" fill={tTheme.hex} />
+                      <path
+                        d="M4 -5 L4 -3 L5.4 -2"
+                        stroke="#050507"
+                        strokeWidth="1.1"
+                        strokeLinecap="round"
+                      />
+                      <text
+                        x="10.5"
+                        y="0.5"
+                        fill={tTheme.hexSoft}
+                        fontSize="9"
+                        fontWeight="800"
+                        fontFamily="ui-monospace, SFMono-Regular, Consolas, monospace"
+                      >
+                        {entry.isRinging
+                          ? "DOLDU!"
+                          : formatRemainingTime(entry.remainingMs)}
+                      </text>
+                    </g>
+                  );
+                })}
               </g>
             ) : (
               <g transform="translate(70, 72)">
@@ -721,7 +765,7 @@ export default function DeskClockWidget({
                 y1="83"
                 x2="127"
                 y2="20"
-                stroke={activeTimerEntry ? ringHex : "#F97316"}
+                stroke={primaryTimerEntry ? ringHex : "#F97316"}
                 strokeWidth="1.5"
                 strokeLinecap="round"
               />
@@ -735,7 +779,7 @@ export default function DeskClockWidget({
                 cx="127"
                 cy="72"
                 r="2"
-                fill={activeTimerEntry ? ringHex : "#F97316"}
+                fill={primaryTimerEntry ? ringHex : "#F97316"}
               />
             </g>
           </g>
@@ -801,32 +845,45 @@ export default function DeskClockWidget({
               {minStr[1]}
             </text>
 
-            {/* Active Note Timer Overlay Pill in Bubble Mode */}
-            {activeTimerEntry && (
+            {/* Active Note Timer Overlay Pills in Bubble Mode (Shows up to 2 simultaneous note timers side by side!) */}
+            {activeTimerEntries.length > 0 && (
               <g transform="translate(127, 23)">
-                <rect
-                  x="-46"
-                  y="-9"
-                  width="92"
-                  height="18"
-                  rx="9"
-                  fill="rgba(9,9,11,0.88)"
-                  stroke={ringHex}
-                  strokeWidth="1.3"
-                />
-                <text
-                  x="0"
-                  y="3.5"
-                  textAnchor="middle"
-                  fill={ringHexSoft}
-                  fontSize="10"
-                  fontWeight="800"
-                  fontFamily="ui-monospace, SFMono-Regular, Consolas, monospace"
-                >
-                  {isRinging
-                    ? "⏰ SÜRE DOLDU!"
-                    : `⏰ ${formatRemainingTime(activeTimerEntry.remainingMs)}`}
-                </text>
+                {activeTimerEntries.slice(0, 2).map((entry, idx, arr) => {
+                  const tTheme =
+                    POSTIT_COLORS[entry.note.color] || POSTIT_COLORS.yellow;
+                  const offsetX =
+                    arr.length === 1 ? 0 : idx === 0 ? -44 : 44;
+                  return (
+                    <g
+                      key={entry.note.id}
+                      transform={`translate(${offsetX}, 0)`}
+                    >
+                      <rect
+                        x="-40"
+                        y="-8.5"
+                        width="80"
+                        height="17"
+                        rx="8.5"
+                        fill="rgba(9,9,11,0.9)"
+                        stroke={tTheme.hex}
+                        strokeWidth="1.3"
+                      />
+                      <text
+                        x="0"
+                        y="3.2"
+                        textAnchor="middle"
+                        fill={tTheme.hexSoft}
+                        fontSize="9.2"
+                        fontWeight="800"
+                        fontFamily="ui-monospace, SFMono-Regular, Consolas, monospace"
+                      >
+                        {entry.isRinging
+                          ? "⏰ DOLDU!"
+                          : `⏰ ${formatRemainingTime(entry.remainingMs)}`}
+                      </text>
+                    </g>
+                  );
+                })}
               </g>
             )}
           </g>

@@ -147,32 +147,36 @@ export default function App() {
     [updateNote]
   );
 
-  // Pick the primary active timer entry to display as the colored ring on the StandBy Desk Clock
-  const activeTimerEntry = (() => {
+  // Collect all active timer entries sorted by soonest expiration (ringing timers first)
+  // so multiple simultaneous timers render concentric colored rings on the StandBy Desk Clock!
+  const activeTimerEntries = (() => {
     const timedNotes = activeNotes.filter((n) => Boolean(n.activeTimer?.targetAt));
-    if (timedNotes.length === 0) return null;
+    if (timedNotes.length === 0) return [];
 
-    // Prioritize a ringing note first, otherwise the soonest expiring timer
-    const ringing = timedNotes.find((n) => ringingNoteIds.includes(n.id));
-    const chosen =
-      ringing ||
-      timedNotes.reduce((best, curr) =>
-        curr.activeTimer.targetAt < best.activeTimer.targetAt ? curr : best
-      );
-
-    const t = chosen.activeTimer;
-    const remainingMs = Math.max(0, t.targetAt - nowTs);
-    const totalMs = Math.max(1000, t.totalMs || t.targetAt - t.startedAt || 60000);
-    // Progress fills from 0 -> 1 as time elapses (or stays full when ringing)
-    const elapsedRatio = Math.max(0, Math.min(1, 1 - remainingMs / totalMs));
-    const isRinging = ringingNoteIds.includes(chosen.id);
-
-    return {
-      note: chosen,
-      remainingMs,
-      progress: isRinging ? 1 : elapsedRatio,
-      isRinging,
-    };
+    return timedNotes
+      .map((note) => {
+        const t = note.activeTimer;
+        const remainingMs = Math.max(0, t.targetAt - nowTs);
+        const totalMs = Math.max(
+          1000,
+          t.totalMs || t.targetAt - t.startedAt || 60000
+        );
+        const elapsedRatio = Math.max(
+          0,
+          Math.min(1, 1 - remainingMs / totalMs)
+        );
+        const isRinging = ringingNoteIds.includes(note.id);
+        return {
+          note,
+          remainingMs,
+          progress: isRinging ? 1 : elapsedRatio,
+          isRinging,
+        };
+      })
+      .sort((a, b) => {
+        if (a.isRinging !== b.isRinging) return a.isRinging ? -1 : 1;
+        return a.remainingMs - b.remainingMs;
+      });
   })();
 
   const summonBasketTemporarily = useCallback(
@@ -695,14 +699,14 @@ export default function App() {
         />
       )}
 
-      {/* 1.5. 2.5D iOS StandBy Mode Desktop Clock Plugin (Lives on Desktop, fills outer ring with note color on @25d / @19.20) */}
+      {/* 1.5. 2.5D iOS StandBy Mode Desktop Clock Plugin (Renders concentric colored rings for multiple simultaneous @25d / @19.20 timers!) */}
       {isClockEnabled && (
         <DeskClockWidget
           clockPos={clockPos}
           onClockPosChange={setClockPos}
           isVisibleOnDesktop={isClockVisibleOnDesktop}
           isStringTargetHighlighted={activeStringDrag?.targetId === DESK_CLOCK_ID}
-          activeTimerEntry={activeTimerEntry}
+          activeTimerEntries={activeTimerEntries}
           onDismissRingingTimer={handleDismissTimerAlarm}
           onInteractiveEnter={handleInteractiveEnter}
           onInteractiveLeave={handleInteractiveLeave}

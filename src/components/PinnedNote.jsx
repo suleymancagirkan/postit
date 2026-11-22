@@ -788,40 +788,11 @@ export default function PinnedNote({
           <GripHorizontal className={`w-3.5 h-3.5 ${theme.subText} opacity-75`} />
         </div>
 
-        <div className="flex items-center gap-1.5">
-          {note.activeTimer && (
-            <button
-              type="button"
-              data-no-drag="true"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDismissTimerAlarm?.(note.id);
-              }}
-              title={
-                isClockAlarmRinging
-                  ? "Alarmı Kapat"
-                  : "Zamanlayıcıyı İptal Et"
-              }
-              className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold tracking-tight transition cursor-pointer ${
-                isClockAlarmRinging
-                  ? "bg-rose-600 text-white animate-pulse shadow-md"
-                  : "bg-neutral-900/85 text-amber-300 hover:bg-neutral-900"
-              }`}
-            >
-              {isClockAlarmRinging
-                ? "⏰ SÜRE DOLDU!"
-                : timerRemainingMs !== null
-                ? `⏰ ${Math.max(0, Math.ceil(timerRemainingMs / 60000))}dk`
-                : `⏰ ${note.activeTimer.label}`}
-            </button>
-          )}
-
-          {isResizing && (
-            <span className={`text-[10px] font-semibold ${theme.subText} opacity-80`}>
-              {liveSize.width}×{liveSize.height}
-            </span>
-          )}
-        </div>
+        {isResizing && (
+          <span className={`text-[10px] font-semibold ${theme.subText} opacity-80`}>
+            {liveSize.width}×{liveSize.height}
+          </span>
+        )}
       </div>
 
       {/* Editable Live Markdown Note Content (scrunches inward when crumpled) */}
