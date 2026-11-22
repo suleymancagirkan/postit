@@ -14,6 +14,7 @@ import DeskClockWidget, {
   DESK_CLOCK_SIZE,
   getDefaultClockPosition,
   getClockThumbtackAnchor,
+  playStandByAlarmChime,
 } from "./components/DeskClockWidget";
 import {
   useNotesStore,
@@ -48,13 +49,12 @@ export default function App() {
     restoreAllNotesFromBasket,
   } = useNotesStore();
 
-  // Minimizing only hides the StickyStack; active notes remain on screen
   const [isStackMinimized, setIsStackMinimized] = useState(false);
 
-  // 2.5D Desktop Table Clock plugin state (lives on Desktop, toggleable from System Tray)
+  // 2.5D iOS StandBy Mode Desktop Clock plugin state
   const [isClockEnabled, setIsClockEnabled] = useState(true);
-  const [isClockAlarmRinging, setIsClockAlarmRinging] = useState(false);
-  const [externalTimerRequest, setExternalTimerRequest] = useState(null);
+  const [nowTs, setNowTs] = useState(() => Date.now());
+  const [ringingNoteIds, setRingingNoteIds] = useState([]);
   const [clockPos, setClockPos] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_CLOCK_POS);
@@ -70,7 +70,6 @@ export default function App() {
     return getDefaultClockPosition();
   });
 
-  // Basket is hidden by default unless dragging a note or summoned via Tray / Edge Bar for 25s
   const [isBasketSummoned, setIsBasketSummoned] = useState(false);
   const basketTimerRef = useRef(null);
 
@@ -82,25 +81,99 @@ export default function App() {
     noteId: null,
   });
 
-  // Live 60fps positions of notes currently being dragged so connected red strings follow smoothly
   const [livePositionsMap, setLivePositionsMap] = useState({});
-
-  // Active detective red string drag state (when dragging from a note's thumbtack to another note)
   const [activeStringDrag, setActiveStringDrag] = useState(null);
-
-  // Timestamps of recently tied/plucked string pairs for damped harmonic guitar-string vibration
   const [pluckTimestampMap, setPluckTimestampMap] = useState({});
-
-  // Cluster chain-reaction animation state ("dropping-trash" | "dropping-basket") for notes tied to a dropped note
   const [clusterDropAnim, setClusterDropAnim] = useState(null);
-
   const [visibilityMap, setVisibilityMap] = useState({});
 
   const isDraggingRef = useRef(false);
   const hoverCountRef = useRef(0);
+  const firedTimersRef = useRef(new Set());
 
   const activeNotes = notes.filter((n) => !n.inBasket);
   const basketNotes = notes.filter((n) => Boolean(n.inBasket));
+
+  // Tick every 500ms to evaluate @25d / @19.20 timers across all notes
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const currentNow = Date.now();
+      setNowTs(currentNow);
+
+      for (const note of activeNotes) {
+        const timer = note.activeTimer;
+        if (!timer || !timer.targetAt) continue;
+
+        const timerKey = `${note.id}_${timer.startedAt}_${timer.targetAt}`;
+        if (
+          currentNow >= timer.targetAt &&
+          !firedTimersRef.current.has(timerKey)
+        ) {
+          firedTimersRef.current.add(timerKey);
+          playStandByAlarmChime();
+          setRingingNoteIds((prev) =>
+            prev.includes(note.id) ? prev : [...prev, note.id]
+          );
+        }
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [activeNotes]);
+
+  // Repeat alarm chime every 2.8s while any note's @timer is ringing
+  useEffect(() => {
+    if (ringingNoteIds.length === 0) return;
+
+    const chimeInterval = setInterval(() => {
+      playStandByAlarmChime();
+    }, 2800);
+
+    return () => clearInterval(chimeInterval);
+  }, [ringingNoteIds]);
+
+  const handleDismissTimerAlarm = useCallback(
+    (noteId) => {
+      setRingingNoteIds((prev) => prev.filter((id) => id !== noteId));
+      // Clear the finished/cancelled activeTimer on that note and remove the timer chip from text if desired
+      updateNote(noteId, (note) => ({
+        activeTimer: null,
+        text: (note.text || "").replace(
+          /<span[^>]*data-timer-chip="true"[^>]*>.*?<\/span>/gi,
+          ""
+        ),
+      }));
+    },
+    [updateNote]
+  );
+
+  // Pick the primary active timer entry to display as the colored ring on the StandBy Desk Clock
+  const activeTimerEntry = (() => {
+    const timedNotes = activeNotes.filter((n) => Boolean(n.activeTimer?.targetAt));
+    if (timedNotes.length === 0) return null;
+
+    // Prioritize a ringing note first, otherwise the soonest expiring timer
+    const ringing = timedNotes.find((n) => ringingNoteIds.includes(n.id));
+    const chosen =
+      ringing ||
+      timedNotes.reduce((best, curr) =>
+        curr.activeTimer.targetAt < best.activeTimer.targetAt ? curr : best
+      );
+
+    const t = chosen.activeTimer;
+    const remainingMs = Math.max(0, t.targetAt - nowTs);
+    const totalMs = Math.max(1000, t.totalMs || t.targetAt - t.startedAt || 60000);
+    // Progress fills from 0 -> 1 as time elapses (or stays full when ringing)
+    const elapsedRatio = Math.max(0, Math.min(1, 1 - remainingMs / totalMs));
+    const isRinging = ringingNoteIds.includes(chosen.id);
+
+    return {
+      note: chosen,
+      remainingMs,
+      progress: isRinging ? 1 : elapsedRatio,
+      isRinging,
+    };
+  })();
 
   const summonBasketTemporarily = useCallback(
     (durationMs = BASKET_SUMMON_DURATION_MS) => {
@@ -214,7 +287,7 @@ export default function App() {
     };
   }, [stashAllNotesToBasket, restoreAllNotesFromBasket, summonBasketTemporarily]);
 
-  // Poll OS window visibility for active screen-pinned notes
+  // Poll OS window visibility for active screen-pinned notes and Desktop StandBy Clock
   useEffect(() => {
     if (!isTauriRuntime()) return;
 
@@ -238,7 +311,6 @@ export default function App() {
         };
       });
 
-      // The 2.5D Desk Clock is pinned to the Desktop ("desktop") so it stays on the wallpaper
       if (isClockEnabled) {
         queries.push({
           id: DESK_CLOCK_ID,
@@ -337,7 +409,6 @@ export default function App() {
       const restoredCluster = getConnectedClusterIds(notes, noteId);
       restoreNoteFromBasket(noteId, clearPin);
 
-      // Vibrate all strings in the restored cluster
       if (restoredCluster.size > 1) {
         const ts = performance.now();
         setPluckTimestampMap((prev) => {
@@ -370,7 +441,6 @@ export default function App() {
     [notes, restoreNoteFromBasket, basketNotes, summonBasketTemporarily]
   );
 
-  // Update live 60fps coordinates of a dragged note and trigger a subtle string vibration on drop
   const handleLivePositionChange = useCallback(
     (noteId, posOrNull) => {
       setLivePositionsMap((prev) => {
@@ -383,7 +453,6 @@ export default function App() {
         return { ...prev, [noteId]: posOrNull };
       });
 
-      // When a note finishes dragging, pluck all strings attached to it
       if (!posOrNull) {
         const movedNote = notes.find((n) => n.id === noteId);
         if (
@@ -409,12 +478,15 @@ export default function App() {
     [notes]
   );
 
-  // Start pulling a red detective string from a note's thumbtack
   const handleStartStringDrag = useCallback(
     (sourceNote, initialClientX, initialClientY) => {
       isDraggingRef.current = true;
       applyIgnoreCursorEvents(false);
-      const startAnchor = getNoteThumbtackAnchor(sourceNote, livePositionsMap);
+      const startAnchor = getNoteThumbtackAnchor(
+        sourceNote,
+        livePositionsMap,
+        clockPos
+      );
 
       setActiveStringDrag({
         sourceId: sourceNote.id,
@@ -426,18 +498,16 @@ export default function App() {
         snapTargetAnchor: null,
       });
     },
-    [applyIgnoreCursorEvents, livePositionsMap]
+    [applyIgnoreCursorEvents, livePositionsMap, clockPos]
   );
 
-  // Track active detective string drag and snap magnetically to target note thumbtacks
   useEffect(() => {
     if (!activeStringDrag) return;
 
     const findTargetNoteAtPoint = (clientX, clientY) => {
-      // Check if cursor is over the 2.5D Desk Clock plugin
       const isClockVis =
         isClockEnabled &&
-        (visibilityMap[DESK_CLOCK_ID] !== false || isClockAlarmRinging);
+        (visibilityMap[DESK_CLOCK_ID] !== false || ringingNoteIds.length > 0);
       if (
         isClockVis &&
         clientX >= clockPos.x - 12 &&
@@ -457,7 +527,6 @@ export default function App() {
 
         const w = clampNoteSize(candidate.width);
         const h = clampNoteSize(candidate.height);
-        // Check if cursor is inside the target card or near its top thumbtack
         if (
           clientX >= candidate.x - 16 &&
           clientX <= candidate.x + w + 16 &&
@@ -525,7 +594,7 @@ export default function App() {
     visibilityMap,
     livePositionsMap,
     isClockEnabled,
-    isClockAlarmRinging,
+    ringingNoteIds.length,
     clockPos,
     toggleNoteLink,
     syncInteractiveRegions,
@@ -587,7 +656,6 @@ export default function App() {
     [notes, applyIgnoreCursorEvents, syncInteractiveRegions]
   );
 
-  // Active cluster of the currently dragged note (so tied partner notes react over Trash/Basket)
   const draggedClusterIds =
     dragState.isDragging && dragState.noteId
       ? getConnectedClusterIds(notes, dragState.noteId)
@@ -595,25 +663,20 @@ export default function App() {
 
   const isClockVisibleOnDesktop =
     isClockEnabled &&
-    (visibilityMap[DESK_CLOCK_ID] !== false || isClockAlarmRinging);
+    (visibilityMap[DESK_CLOCK_ID] !== false || ringingNoteIds.length > 0);
 
-  // Notes tied to the Desk Clock (directly or via string cluster) vibrate when the clock alarm rings
-  const clockLinkedClusterIds = isClockAlarmRinging
-    ? (() => {
-        const set = new Set();
-        for (const n of activeNotes) {
-          if (Array.isArray(n.linkedIds) && n.linkedIds.includes(DESK_CLOCK_ID)) {
-            const cluster = getConnectedClusterIds(activeNotes, n.id);
+  // Any note whose @timer is ringing (plus any notes tied to it by red detective string!) vibrates
+  const ringingClusterIds =
+    ringingNoteIds.length > 0
+      ? (() => {
+          const set = new Set();
+          for (const rId of ringingNoteIds) {
+            const cluster = getConnectedClusterIds(activeNotes, rId);
             cluster.forEach((cid) => set.add(cid));
           }
-        }
-        return set;
-      })()
-    : null;
-
-  const clockDirectLinksCount = activeNotes.filter(
-    (n) => Array.isArray(n.linkedIds) && n.linkedIds.includes(DESK_CLOCK_ID)
-  ).length;
+          return set;
+        })()
+      : null;
 
   return (
     <main className="relative w-screen h-screen bg-transparent overflow-hidden select-none">
@@ -632,16 +695,15 @@ export default function App() {
         />
       )}
 
-      {/* 1.5. 2.5D Twin-Bell Desktop Table Clock & Timer Plugin (Lives on Desktop) */}
+      {/* 1.5. 2.5D iOS StandBy Mode Desktop Clock Plugin (Lives on Desktop, fills outer ring with note color on @25d / @19.20) */}
       {isClockEnabled && (
         <DeskClockWidget
           clockPos={clockPos}
           onClockPosChange={setClockPos}
           isVisibleOnDesktop={isClockVisibleOnDesktop}
           isStringTargetHighlighted={activeStringDrag?.targetId === DESK_CLOCK_ID}
-          linkedNoteCount={clockDirectLinksCount}
-          externalTimerRequest={externalTimerRequest}
-          onAlarmStateChange={setIsClockAlarmRinging}
+          activeTimerEntry={activeTimerEntry}
+          onDismissRingingTimer={handleDismissTimerAlarm}
           onInteractiveEnter={handleInteractiveEnter}
           onInteractiveLeave={handleInteractiveLeave}
         />
@@ -653,7 +715,6 @@ export default function App() {
           ? visibilityMap[note.id] !== false
           : true;
 
-        // Determine if this note is being pulled into Trash or Basket via a connected red string
         let clusterEffect = null;
         if (
           clusterDropAnim &&
@@ -674,8 +735,11 @@ export default function App() {
         }
 
         const isNoteAlarmRinging = Boolean(
-          clockLinkedClusterIds && clockLinkedClusterIds.has(note.id)
+          ringingClusterIds && ringingClusterIds.has(note.id)
         );
+        const timerRemainingMs = note.activeTimer?.targetAt
+          ? Math.max(0, note.activeTimer.targetAt - nowTs)
+          : null;
 
         return (
           <PinnedNote
@@ -684,6 +748,8 @@ export default function App() {
             isVisibleOnScreen={isVisibleOnScreen}
             isStringTargetHighlighted={activeStringDrag?.targetId === note.id}
             isClockAlarmRinging={isNoteAlarmRinging}
+            timerRemainingMs={timerRemainingMs}
+            onDismissTimerAlarm={handleDismissTimerAlarm}
             clusterEffect={clusterEffect}
             onUpdate={updateNote}
             onToggleScreenPin={toggleNoteScreenPin}
@@ -699,7 +765,7 @@ export default function App() {
         );
       })}
 
-      {/* 3. 2.5D Detective Red Yarn Strings Layer between connected Post-it thumbtacks (and Desk Clock) */}
+      {/* 3. 2.5D Detective Red Yarn Strings Layer */}
       <AgentStringsLayer
         notes={activeNotes}
         visibilityMap={visibilityMap}

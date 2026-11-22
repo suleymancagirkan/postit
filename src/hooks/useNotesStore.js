@@ -19,6 +19,8 @@ export const POSTIT_COLORS = {
   yellow: {
     id: "yellow",
     label: "Klasik Sarı",
+    hex: "#FACC15",
+    hexSoft: "#FEF08A",
     bodyBg: "bg-[#FFF275]",
     stripBg: "bg-[#F4E04D]",
     border: "border-[#E5CF38]",
@@ -32,6 +34,8 @@ export const POSTIT_COLORS = {
   pink: {
     id: "pink",
     label: "Pastel Pembe",
+    hex: "#FB7185",
+    hexSoft: "#FECDD3",
     bodyBg: "bg-[#FFC4D6]",
     stripBg: "bg-[#F6A9C1]",
     border: "border-[#EA96B0]",
@@ -45,6 +49,8 @@ export const POSTIT_COLORS = {
   mint: {
     id: "mint",
     label: "Nane Yeşili",
+    hex: "#34D399",
+    hexSoft: "#A7F3D0",
     bodyBg: "bg-[#B5F2D6]",
     stripBg: "bg-[#95E4C0]",
     border: "border-[#80D6AF]",
@@ -58,6 +64,8 @@ export const POSTIT_COLORS = {
   sky: {
     id: "sky",
     label: "Gökyüzü Mavisi",
+    hex: "#38BDF8",
+    hexSoft: "#BAE6FD",
     bodyBg: "bg-[#BCE4FF]",
     stripBg: "bg-[#9AD0F7]",
     border: "border-[#84C1EE]",
@@ -71,6 +79,8 @@ export const POSTIT_COLORS = {
   lavender: {
     id: "lavender",
     label: "Lavanta Moru",
+    hex: "#C084FC",
+    hexSoft: "#E9D5FF",
     bodyBg: "bg-[#DEC7FF]",
     stripBg: "bg-[#C7A9F7]",
     border: "border-[#B896EE]",
@@ -84,6 +94,8 @@ export const POSTIT_COLORS = {
   peach: {
     id: "peach",
     label: "Şeftali Turuncusu",
+    hex: "#FB923C",
+    hexSoft: "#FED7AA",
     bodyBg: "bg-[#FFD1B3]",
     stripBg: "bg-[#F9B88E]",
     border: "border-[#EEA779]",
@@ -105,6 +117,80 @@ const NATURAL_ANGLES = [-2.4, -1.6, -0.8, 0.7, 1.4, 2.2, -1.2, 1.8];
 
 function pickNaturalAngle(index = 0) {
   return NATURAL_ANGLES[index % NATURAL_ANGLES.length];
+}
+
+/**
+ * Extracts a timer expression (e.g. "25d", "15dk", "30s", "19.20", "19:20") from note HTML/text
+ * and computes `{ expr, label, totalMs, startedAt, targetAt }`.
+ */
+export function extractTimerSpecFromText(htmlOrText = "") {
+  if (!htmlOrText) return null;
+
+  // Check for data-timer-expr="..." chip first
+  const chipMatch = htmlOrText.match(/data-timer-expr="([^"]+)"/i);
+  let rawExpr = chipMatch ? chipMatch[1].trim() : null;
+
+  if (!rawExpr) {
+    // Also check plain text @25d or @19.20
+    const plain = htmlOrText.replace(/<[^>]+>/g, " ");
+    const atMatch = plain.match(
+      /(?:^|\s)@(\d{1,2}[.:]\d{2}|\d{1,3}\s*(?:dk|d|min|m|sn|s|sa|h))\b/i
+    );
+    if (atMatch) {
+      rawExpr = atMatch[1].trim();
+    }
+  }
+
+  if (!rawExpr) return null;
+
+  const now = Date.now();
+
+  // Case 1: Target Wall-Clock Time like "19.20" or "19:20"
+  const clockMatch = rawExpr.match(/^(\d{1,2})[.:](\d{2})$/);
+  if (clockMatch) {
+    const hours = Math.min(23, Math.max(0, parseInt(clockMatch[1], 10)));
+    const mins = Math.min(59, Math.max(0, parseInt(clockMatch[2], 10)));
+    const targetDate = new Date();
+    targetDate.setHours(hours, mins, 0, 0);
+    if (targetDate.getTime() <= now) {
+      // If that time already passed today, schedule for tomorrow
+      targetDate.setDate(targetDate.getDate() + 1);
+    }
+    const totalMs = Math.max(1000, targetDate.getTime() - now);
+    const label = `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
+    return {
+      expr: rawExpr.toLowerCase(),
+      label,
+      isTargetClockTime: true,
+      totalMs,
+      startedAt: now,
+      targetAt: targetDate.getTime(),
+    };
+  }
+
+  // Case 2: Duration like "25d", "15dk", "30s", "1sa"
+  const durMatch = rawExpr.match(/^(\d{1,3})\s*(dk|d|min|m|sn|s|sa|h)$/i);
+  if (durMatch) {
+    const amount = Math.max(1, parseInt(durMatch[1], 10));
+    const unit = durMatch[2].toLowerCase();
+    let multiplierMs = 60 * 1000;
+    if (unit === "s" || unit === "sn") {
+      multiplierMs = 1000;
+    } else if (unit === "sa" || unit === "h") {
+      multiplierMs = 3600 * 1000;
+    }
+    const totalMs = amount * multiplierMs;
+    return {
+      expr: rawExpr.toLowerCase(),
+      label: rawExpr,
+      isTargetClockTime: false,
+      totalMs,
+      startedAt: now,
+      targetAt: now + totalMs,
+    };
+  }
+
+  return null;
 }
 
 function isTauriRuntime() {
@@ -230,6 +316,7 @@ export function useNotesStore() {
               pinnedTarget: n.pinnedTarget || null,
               inBasket: Boolean(n.inBasket),
               linkedIds: Array.isArray(n.linkedIds) ? n.linkedIds : [],
+              activeTimer: n.activeTimer || extractTimerSpecFromText(n.text),
             }))
           : [];
         const maxZ = validNotes.reduce(
@@ -298,9 +385,12 @@ export function useNotesStore() {
       const clampedX = Math.max(16, Math.min(window.innerWidth - size - 16, Math.round(x)));
       const clampedY = Math.max(16, Math.min(window.innerHeight - size - 16, Math.round(y)));
 
+      const textVal = (text ?? stackDraft.text).trim() || "";
+      const initialTimer = extractTimerSpecFromText(textVal);
+
       const newNote = {
         id: `note_${now}_${Math.random().toString(36).slice(2, 7)}`,
-        text: (text ?? stackDraft.text).trim() || "",
+        text: textVal,
         color: POSTIT_COLORS[color || stackDraft.color]
           ? color || stackDraft.color
           : "yellow",
@@ -311,6 +401,7 @@ export function useNotesStore() {
         pinnedTarget: null,
         inBasket: Boolean(inBasket),
         linkedIds: [],
+        activeTimer: initialTimer,
         rotation: pickNaturalAngle(notes.length + Math.floor(Math.random() * 6)),
         zIndex: highestZRef.current,
         createdAt: now,
@@ -329,9 +420,28 @@ export function useNotesStore() {
       prev.map((note) => {
         if (note.id !== id) return note;
         const resolved = typeof patch === "function" ? patch(note) : patch;
+        const nextText =
+          resolved.text !== undefined ? resolved.text : note.text;
+
+        // Sync activeTimer if the note's text changed
+        let nextTimer =
+          resolved.activeTimer !== undefined
+            ? resolved.activeTimer
+            : note.activeTimer || null;
+
+        if (resolved.text !== undefined && resolved.activeTimer === undefined) {
+          const parsedSpec = extractTimerSpecFromText(nextText);
+          if (!parsedSpec) {
+            nextTimer = null;
+          } else if (!note.activeTimer || note.activeTimer.expr !== parsedSpec.expr) {
+            nextTimer = parsedSpec;
+          }
+        }
+
         return {
           ...note,
           ...resolved,
+          activeTimer: nextTimer,
           width:
             resolved.width !== undefined
               ? clampNoteSize(resolved.width)

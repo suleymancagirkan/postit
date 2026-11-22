@@ -338,6 +338,8 @@ export default function PinnedNote({
   isVisibleOnScreen = true,
   isStringTargetHighlighted = false,
   isClockAlarmRinging = false,
+  timerRemainingMs = null,
+  onDismissTimerAlarm,
   clusterEffect = null, // "hover-trash" | "dropping-trash" | "hover-basket" | "dropping-basket" | null
   onUpdate,
   onToggleScreenPin,
@@ -405,7 +407,10 @@ export default function PinnedNote({
   }, [isVisibleOnScreen, onInteractiveLeave]);
 
   const handlePointerDown = (e) => {
-    if (!isVisibleOnScreen) return;
+    if (!isVisibleOnScreen && !isClockAlarmRinging) return;
+    if (isClockAlarmRinging) {
+      onDismissTimerAlarm?.(note.id);
+    }
     onBringToFront?.(note.id);
 
     if (
@@ -746,7 +751,9 @@ export default function PinnedNote({
       }}
       className={`fixed overflow-visible rounded-3xl ${theme.bodyBg} ${theme.border} border-2 paper-texture flex flex-col justify-between select-none transition-colors duration-200 ${
         isClockAlarmRinging
-          ? "ring-4 ring-amber-400 shadow-[0_24px_55px_-8px_rgba(245,158,11,0.65)]"
+          ? "ring-4 ring-rose-500 shadow-[0_24px_60px_-6px_rgba(244,63,94,0.75)]"
+          : note.activeTimer
+          ? "ring-2 ring-neutral-900/35 shadow-[0_18px_36px_-6px_rgba(0,0,0,0.34)]"
           : isStringTargetHighlighted
           ? "ring-4 ring-red-500/80 shadow-[0_24px_55px_-10px_rgba(220,38,38,0.45)]"
           : isDragging
@@ -781,11 +788,40 @@ export default function PinnedNote({
           <GripHorizontal className={`w-3.5 h-3.5 ${theme.subText} opacity-75`} />
         </div>
 
-        {isResizing && (
-          <span className={`text-[10px] font-semibold ${theme.subText} opacity-80`}>
-            {liveSize.width}×{liveSize.height}
-          </span>
-        )}
+        <div className="flex items-center gap-1.5">
+          {note.activeTimer && (
+            <button
+              type="button"
+              data-no-drag="true"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDismissTimerAlarm?.(note.id);
+              }}
+              title={
+                isClockAlarmRinging
+                  ? "Alarmı Kapat"
+                  : "Zamanlayıcıyı İptal Et"
+              }
+              className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold tracking-tight transition cursor-pointer ${
+                isClockAlarmRinging
+                  ? "bg-rose-600 text-white animate-pulse shadow-md"
+                  : "bg-neutral-900/85 text-amber-300 hover:bg-neutral-900"
+              }`}
+            >
+              {isClockAlarmRinging
+                ? "⏰ SÜRE DOLDU!"
+                : timerRemainingMs !== null
+                ? `⏰ ${Math.max(0, Math.ceil(timerRemainingMs / 60000))}dk`
+                : `⏰ ${note.activeTimer.label}`}
+            </button>
+          )}
+
+          {isResizing && (
+            <span className={`text-[10px] font-semibold ${theme.subText} opacity-80`}>
+              {liveSize.width}×{liveSize.height}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Editable Live Markdown Note Content (scrunches inward when crumpled) */}

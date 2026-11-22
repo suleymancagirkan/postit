@@ -1,215 +1,190 @@
 import React, { useState, useEffect, useRef, useId } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Play, Pause, RotateCcw, BellOff } from "lucide-react";
+import { motion } from "framer-motion";
+import { POSTIT_COLORS } from "../hooks/useNotesStore";
 
 const STORAGE_KEY_CLOCK_POS = "postit_desktop_clock_pos_v1";
-const STORAGE_KEY_CLOCK_TIMER = "postit_desktop_clock_timer_v1";
-
-/**
- * Plays a pleasant mechanical twin-bell desk clock chime using the Web Audio API (no external audio assets).
- */
-function playDeskBellChime() {
-  try {
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
-
-    const hitTimes = [0, 0.11, 0.22, 0.33, 0.55, 0.66, 0.77, 0.88];
-    hitTimes.forEach((offset, idx) => {
-      const osc = ctx.createOscillator();
-      const overtone = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.type = "triangle";
-      osc.frequency.setValueAtTime(idx % 2 === 0 ? 1568 : 1760, ctx.currentTime + offset);
-
-      overtone.type = "sine";
-      overtone.frequency.setValueAtTime(idx % 2 === 0 ? 3136 : 3520, ctx.currentTime + offset);
-
-      gain.gain.setValueAtTime(0.001, ctx.currentTime + offset);
-      gain.gain.exponentialRampToValueAtTime(0.16, ctx.currentTime + offset + 0.012);
-      gain.gain.exponentialRampToValueAtTime(0.0008, ctx.currentTime + offset + 0.1);
-
-      osc.connect(gain);
-      overtone.connect(gain);
-      gain.connect(ctx.destination);
-
-      osc.start(ctx.currentTime + offset);
-      overtone.start(ctx.currentTime + offset);
-      osc.stop(ctx.currentTime + offset + 0.11);
-      overtone.stop(ctx.currentTime + offset + 0.11);
-    });
-
-    setTimeout(() => {
-      ctx.close().catch(() => {});
-    }, 1400);
-  } catch {
-    // ignore audio errors
-  }
-}
+const STORAGE_KEY_CLOCK_FACE = "postit_desktop_clock_face_v1";
 
 export const DESK_CLOCK_ID = "__desk_clock__";
-export const DESK_CLOCK_SIZE = { width: 168, height: 196 };
+export const DESK_CLOCK_SIZE = { width: 254, height: 144 };
+
+const TURKISH_DAYS_SHORT = ["PAZ", "PZT", "SAL", "ÇAR", "PER", "CUM", "CMT"];
 
 export function getDefaultClockPosition() {
-  if (typeof window === "undefined") return { x: 46, y: 310 };
+  if (typeof window === "undefined") return { x: 36, y: 310 };
   return {
-    x: 42,
-    y: Math.max(290, window.innerHeight - 250),
+    x: 36,
+    y: Math.max(280, window.innerHeight - 210),
   };
 }
 
 export function getClockThumbtackAnchor(clockPos) {
   return {
     x: clockPos.x + DESK_CLOCK_SIZE.width / 2,
-    y: clockPos.y + 16,
+    y: clockPos.y + 8,
   };
 }
 
-function formatCountdown(totalSec) {
-  const s = Math.max(0, Math.floor(totalSec));
-  const mins = Math.floor(s / 60);
-  const secs = s % 60;
+/**
+ * Plays a warm Apple StandBy-inspired marimba/glass chime when a note's @timer finishes.
+ */
+export function playStandByAlarmChime() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+
+    const notes = [
+      { freq: 587.33, time: 0 }, // D5
+      { freq: 880.0, time: 0.14 }, // A5
+      { freq: 1174.66, time: 0.28 }, // D6
+      { freq: 1318.51, time: 0.44 }, // E6
+    ];
+
+    notes.forEach(({ freq, time }) => {
+      const osc = ctx.createOscillator();
+      const sub = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, ctx.currentTime + time);
+
+      sub.type = "triangle";
+      sub.frequency.setValueAtTime(freq * 2, ctx.currentTime + time);
+
+      gain.gain.setValueAtTime(0.001, ctx.currentTime + time);
+      gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + time + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0008, ctx.currentTime + time + 0.35);
+
+      osc.connect(gain);
+      sub.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(ctx.currentTime + time);
+      sub.start(ctx.currentTime + time);
+      osc.stop(ctx.currentTime + time + 0.36);
+      sub.stop(ctx.currentTime + time + 0.36);
+    });
+
+    setTimeout(() => {
+      ctx.close().catch(() => {});
+    }, 1100);
+  } catch {
+    // ignore audio errors
+  }
+}
+
+export function formatRemainingTime(ms) {
+  const totalSec = Math.max(0, Math.ceil(ms / 1000));
+  const hrs = Math.floor(totalSec / 3600);
+  const mins = Math.floor((totalSec % 3600) / 60);
+  const secs = totalSec % 60;
+  if (hrs > 0) {
+    return `${hrs}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  }
   return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 }
 
 /**
- * 2.5D Twin-Bell Retro-Modern Desktop Table Clock & Countdown Timer Plugin
- * - Lives on the Desktop (Masaüstü), hiding when covered by normal windows unless its alarm is ringing!
- * - Can be linked to Post-it notes via red detective strings or @5dk note syntax.
+ * Computes radial ray intersection with a rounded-rectangular StandBy perimeter
+ * so the 60 tick marks match Image 1 (iOS StandBy Analog rectangular radial ticks).
+ */
+function buildStandByPerimeterTicks(width = 230, height = 120) {
+  const cx = 127;
+  const cy = 72;
+  const halfW = width / 2;
+  const halfH = height / 2;
+  const ticks = [];
+
+  for (let i = 0; i < 60; i++) {
+    // Skip ticks right behind the 12, 3, 6, 9 numerals
+    if (i === 0 || i === 15 || i === 30 || i === 45) {
+      // Keep the cardinal marker lines for 3 and 9, short for 12 and 6
+    }
+
+    const angle = (i * 6 * Math.PI) / 180;
+    const dx = Math.sin(angle);
+    const dy = -Math.cos(angle);
+
+    const tx = Math.abs(dx) > 1e-5 ? halfW / Math.abs(dx) : Infinity;
+    const ty = Math.abs(dy) > 1e-5 ? halfH / Math.abs(dy) : Infinity;
+    const tOuter = Math.min(tx, ty);
+
+    const isHourTick = i % 5 === 0;
+    const isCardinal = i % 15 === 0;
+
+    let innerPull = isHourTick ? 24 : 11;
+    if (i === 0 || i === 30) innerPull = 8; // Leave room for 12 and 6 numerals
+    if (i === 15 || i === 45) innerPull = 22; // Long horizontal bars outside 3 and 9
+
+    const xOuter = cx + dx * tOuter;
+    const yOuter = cy + dy * tOuter;
+    const xInner = cx + dx * Math.max(12, tOuter - innerPull);
+    const yInner = cy + dy * Math.max(12, tOuter - innerPull);
+
+    ticks.push({
+      i,
+      x1: xInner,
+      y1: yInner,
+      x2: xOuter,
+      y2: yOuter,
+      isHourTick,
+      isCardinal,
+    });
+  }
+
+  return ticks;
+}
+
+const STANDBY_TICKS = buildStandByPerimeterTicks(218, 110);
+
+/**
+ * 2.5D iOS StandBy Mode Desktop Clock Plugin
+ * - Face Mode 1 ("analog"): iOS StandBy rectangular radial analog face (Image 1)
+ * - Face Mode 2 ("bubble"): iOS StandBy oversized 3D bubble digital face (Image 2)
+ * - Click clock to switch between Analog and Bubble Digital faces (or silence a ringing note timer).
+ * - Automatically wraps a glowing colored progress ring around the clock bezel matching
+ *   the color of any Post-it note that has an active @25d or @19.20 timer!
  */
 export default function DeskClockWidget({
   clockPos,
   onClockPosChange,
   isVisibleOnDesktop = true,
   isStringTargetHighlighted = false,
-  linkedNoteCount = 0,
-  externalTimerRequest = null,
-  onAlarmStateChange,
+  activeTimerEntry = null, // { note, remainingMs, progress, isRinging }
+  onDismissRingingTimer,
   onInteractiveEnter,
   onInteractiveLeave,
 }) {
   const uid = useId().replace(/:/g, "");
   const [now, setNow] = useState(() => new Date());
-  const [mode, setMode] = useState("clock"); // "clock" | "timer"
-  const [totalSeconds, setTotalSeconds] = useState(300); // default 5 min
-  const [remainingSeconds, setRemainingSeconds] = useState(300);
-  const [isRunning, setIsRunning] = useState(false);
-  const [isRinging, setIsRinging] = useState(false);
+  const [faceMode, setFaceMode] = useState(() => {
+    try {
+      return localStorage.getItem(STORAGE_KEY_CLOCK_FACE) === "bubble"
+        ? "bubble"
+        : "analog";
+    } catch {
+      return "analog";
+    }
+  });
   const [isDragging, setIsDragging] = useState(false);
 
   const dragStartRef = useRef(null);
-  const lastHandledReqRef = useRef(null);
+  const didMoveRef = useRef(false);
 
-  // Restore saved timer state on mount
+  // Smooth time update (250ms so countdown ring and second hand feel responsive)
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_CLOCK_TIMER);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.totalSeconds) setTotalSeconds(parsed.totalSeconds);
-        if (parsed.mode === "timer") setMode("timer");
-        if (parsed.isRunning && parsed.targetTimestamp) {
-          const left = Math.round((parsed.targetTimestamp - Date.now()) / 1000);
-          if (left > 0) {
-            setRemainingSeconds(left);
-            setIsRunning(true);
-          } else {
-            setRemainingSeconds(0);
-            setIsRunning(false);
-          }
-        } else if (typeof parsed.remainingSeconds === "number") {
-          setRemainingSeconds(parsed.remainingSeconds);
-        }
-      }
-    } catch {
-      // ignore
-    }
+    const timer = setInterval(() => {
+      setNow(new Date());
+    }, 250);
+    return () => clearInterval(timer);
   }, []);
 
-  // Persist timer state
-  useEffect(() => {
-    try {
-      const payload = {
-        mode,
-        totalSeconds,
-        remainingSeconds,
-        isRunning,
-        targetTimestamp: isRunning ? Date.now() + remainingSeconds * 1000 : null,
-      };
-      localStorage.setItem(STORAGE_KEY_CLOCK_TIMER, JSON.stringify(payload));
-    } catch {
-      // ignore
-    }
-  }, [mode, totalSeconds, remainingSeconds, isRunning]);
-
-  // Accept external timer commands triggered by typing @5dk or @15dk inside a Post-it note
-  useEffect(() => {
-    if (
-      !externalTimerRequest ||
-      externalTimerRequest.reqId === lastHandledReqRef.current
-    ) {
-      return;
-    }
-    lastHandledReqRef.current = externalTimerRequest.reqId;
-    const secs = Math.max(5, Math.round(externalTimerRequest.seconds || 300));
-    setMode("timer");
-    setTotalSeconds(secs);
-    setRemainingSeconds(secs);
-    setIsRinging(false);
-    setIsRunning(true);
-  }, [externalTimerRequest]);
-
-  // Real-time 1-second tick for both wall clock and countdown timer
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setNow(new Date());
-
-      if (isRunning) {
-        setRemainingSeconds((prev) => {
-          if (prev <= 1) {
-            setIsRunning(false);
-            setIsRinging(true);
-            playDeskBellChime();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [isRunning]);
-
-  // Repeat bell chime every 2.4s while ringing (auto-stops after 18s if untouched)
-  useEffect(() => {
-    onAlarmStateChange?.(isRinging);
-    if (!isRinging) return;
-
-    const chimeInterval = setInterval(() => {
-      playDeskBellChime();
-    }, 2400);
-
-    const autoStopTimer = setTimeout(() => {
-      setIsRinging(false);
-    }, 18000);
-
-    return () => {
-      clearInterval(chimeInterval);
-      clearTimeout(autoStopTimer);
-    };
-  }, [isRinging, onAlarmStateChange]);
-
   const handlePointerDown = (e) => {
-    if (
-      e.target.closest("[data-no-drag='true']") ||
-      e.target.tagName.toLowerCase() === "button"
-    ) {
-      return;
-    }
     e.preventDefault();
     e.stopPropagation();
 
+    didMoveRef.current = false;
     dragStartRef.current = {
       startClientX: e.clientX,
       startClientY: e.clientY,
@@ -226,6 +201,9 @@ export default function DeskClockWidget({
       if (!dragStartRef.current) return;
       const dx = e.clientX - dragStartRef.current.startClientX;
       const dy = e.clientY - dragStartRef.current.startClientY;
+      if (Math.hypot(dx, dy) > 5) {
+        didMoveRef.current = true;
+      }
 
       const nextX = Math.max(
         10,
@@ -252,6 +230,23 @@ export default function DeskClockWidget({
       } catch {
         // ignore
       }
+
+      // If it was a clean click (not a drag), either silence ringing alarm or switch between StandBy Analog & Bubble Digital
+      if (!didMoveRef.current) {
+        if (activeTimerEntry?.isRinging) {
+          onDismissRingingTimer?.(activeTimerEntry.note.id);
+        } else {
+          setFaceMode((prev) => {
+            const next = prev === "analog" ? "bubble" : "analog";
+            try {
+              localStorage.setItem(STORAGE_KEY_CLOCK_FACE, next);
+            } catch {
+              // ignore
+            }
+            return next;
+          });
+        }
+      }
     };
 
     window.addEventListener("pointermove", handleMove);
@@ -260,42 +255,46 @@ export default function DeskClockWidget({
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", handleUp);
     };
-  }, [isDragging, clockPos, onClockPosChange]);
+  }, [
+    isDragging,
+    clockPos,
+    onClockPosChange,
+    activeTimerEntry,
+    onDismissRingingTimer,
+  ]);
 
-  const selectPresetMinutes = (mins) => {
-    const secs = mins * 60;
-    setMode("timer");
-    setIsRinging(false);
-    setTotalSeconds(secs);
-    setRemainingSeconds(secs);
-    setIsRunning(true);
-  };
+  const isRinging = Boolean(activeTimerEntry?.isRinging);
+  const timerNote = activeTimerEntry?.note || null;
+  const timerTheme = timerNote
+    ? POSTIT_COLORS[timerNote.color] || POSTIT_COLORS.yellow
+    : null;
+  const ringHex = timerTheme ? timerTheme.hex : "#FACC15";
+  const ringHexSoft = timerTheme ? timerTheme.hexSoft : "#FEF08A";
 
-  const handleTopPlungerClick = (e) => {
-    e.stopPropagation();
-    if (isRinging) {
-      setIsRinging(false);
-      setRemainingSeconds(totalSeconds);
-      return;
-    }
-    setMode((prev) => (prev === "clock" ? "timer" : "clock"));
-  };
+  // Rounded-rectangle outer perimeter length for rx=30, width=244, height=134:
+  // Straight segments = 2*(244 - 60) + 2*(134 - 60) = 368 + 148 = 516
+  // Corner arcs = 2 * pi * 30 ≈ 188.5 -> Total perimeter ≈ 704.5
+  const rectPerimeter = 704.5;
+  const progressRatio = activeTimerEntry
+    ? Math.max(0.02, Math.min(1, activeTimerEntry.progress))
+    : 0;
+  const dashOffset = rectPerimeter * (1 - progressRatio);
 
-  // Analog hand angles
-  const hours = now.getHours() % 12;
+  // Clock time values
+  const hours24 = now.getHours();
+  const hours12 = hours24 % 12;
   const minutes = now.getMinutes();
   const seconds = now.getSeconds();
-  const hourDeg = hours * 30 + minutes * 0.5;
-  const minuteDeg = minutes * 6 + seconds * 0.1;
-  const secondDeg = seconds * 6;
+  const millis = now.getMilliseconds();
 
-  // Countdown progress ring (circumference = 2 * pi * 45 ≈ 282.7)
-  const circumference = 282.74;
-  const progressRatio =
-    totalSeconds > 0 ? Math.max(0, Math.min(1, remainingSeconds / totalSeconds)) : 0;
-  const dashOffset = circumference * (1 - progressRatio);
+  const smoothSeconds = seconds + millis / 1000;
+  const hourDeg = hours12 * 30 + minutes * 0.5;
+  const minuteDeg = minutes * 6 + smoothSeconds * 0.1;
+  const secondDeg = smoothSeconds * 6;
 
-  // Visible when Desktop is exposed, OR when being dragged, OR when alarm is actively ringing!
+  const dayName = TURKISH_DAYS_SHORT[now.getDay()];
+  const dayNumber = now.getDate();
+
   const actuallyVisible = isVisibleOnDesktop || isDragging || isRinging;
 
   useEffect(() => {
@@ -304,27 +303,43 @@ export default function DeskClockWidget({
     }
   }, [actuallyVisible, onInteractiveLeave]);
 
+  // Digits for Mode 2 (StandBy Bubble Digital, e.g. "9:41" or "19:45")
+  const hourStr = String(hours24).padStart(2, "0");
+  const minStr = String(minutes).padStart(2, "0");
+
   return (
     <motion.div
       data-interactive={actuallyVisible ? "true" : "false"}
       onMouseEnter={actuallyVisible ? onInteractiveEnter : undefined}
       onMouseLeave={actuallyVisible ? onInteractiveLeave : undefined}
       onPointerDown={handlePointerDown}
-      initial={{ scale: 0.85, opacity: 0 }}
+      initial={{ scale: 0.88, opacity: 0 }}
       animate={
         !actuallyVisible
           ? {
               x: clockPos.x,
               y: clockPos.y + 24,
-              scale: 0.78,
+              scale: 0.8,
               opacity: 0,
             }
           : isRinging
           ? {
-              x: [clockPos.x - 4, clockPos.x + 4, clockPos.x - 4, clockPos.x + 4, clockPos.x],
-              y: [clockPos.y, clockPos.y - 5, clockPos.y, clockPos.y - 4, clockPos.y],
-              rotate: [-4, 4, -5, 5, 0],
-              scale: 1.06,
+              x: [
+                clockPos.x - 5,
+                clockPos.x + 5,
+                clockPos.x - 5,
+                clockPos.x + 5,
+                clockPos.x,
+              ],
+              y: [
+                clockPos.y,
+                clockPos.y - 4,
+                clockPos.y,
+                clockPos.y - 4,
+                clockPos.y,
+              ],
+              rotate: [-2.5, 2.5, -2.5, 2.5, 0],
+              scale: 1.05,
               opacity: 1,
             }
           : {
@@ -337,10 +352,10 @@ export default function DeskClockWidget({
       }
       transition={
         isRinging
-          ? { duration: 0.42, repeat: Infinity }
+          ? { duration: 0.38, repeat: Infinity }
           : isDragging
           ? { type: "tween", duration: 0 }
-          : { type: "spring", stiffness: 360, damping: 26 }
+          : { type: "spring", stiffness: 380, damping: 26 }
       }
       style={{
         left: 0,
@@ -350,399 +365,481 @@ export default function DeskClockWidget({
         zIndex: isRinging || isDragging ? 9998 : 18,
         pointerEvents: actuallyVisible ? "auto" : "none",
       }}
-      className={`fixed select-none flex flex-col items-center ${
+      title={
+        isRinging
+          ? "Alarmı susturmak için tıklayın"
+          : "Sürükle: Taşı • Tıkla: StandBy Saat Modunu Değiştir (Analog / Dijital)"
+      }
+      className={`fixed select-none ${
         isDragging ? "cursor-grabbing" : "cursor-grab"
       }`}
     >
-      {/* 2.5D Twin-Bell Table Clock SVG Sculpture */}
-      <div className="relative w-full h-full flex flex-col items-center">
-        {/* Floor Contact Shadow under Brass Feet */}
-        <div
-          className={`absolute bottom-4 w-32 h-5 rounded-full bg-black blur-md pointer-events-none transition-opacity ${
-            isRinging ? "opacity-60" : "opacity-45"
-          }`}
+      {/* 2.5D Desktop Contact Shadow */}
+      <div
+        className={`absolute -bottom-2.5 left-6 right-6 h-5 rounded-full bg-black blur-md pointer-events-none transition-opacity ${
+          isRinging ? "opacity-65" : "opacity-45"
+        }`}
+      />
+
+      <svg
+        width={DESK_CLOCK_SIZE.width}
+        height={DESK_CLOCK_SIZE.height}
+        viewBox="0 0 254 144"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        className="overflow-visible"
+      >
+        <defs>
+          {/* 3D Titanium Outer Case Bezel */}
+          <linearGradient
+            id={`standbyBezel_${uid}`}
+            x1="0"
+            y1="0"
+            x2="254"
+            y2="144"
+            gradientUnits="userSpaceOnUse"
+          >
+            <stop offset="0%" stopColor="#52525B" />
+            <stop offset="28%" stopColor="#27272A" />
+            <stop offset="70%" stopColor="#18181B" />
+            <stop offset="100%" stopColor="#09090B" />
+          </linearGradient>
+
+          {/* Bubble Digital Mode Gradients (Matches Image 2 or active Post-it timer color) */}
+          <linearGradient
+            id={`bubbleHourGrad_${uid}`}
+            x1="0%"
+            y1="0%"
+            x2="100%"
+            y2="100%"
+          >
+            <stop
+              offset="0%"
+              stopColor={activeTimerEntry ? ringHexSoft : "#F472B6"}
+            />
+            <stop
+              offset="100%"
+              stopColor={activeTimerEntry ? ringHex : "#DB2777"}
+            />
+          </linearGradient>
+
+          <linearGradient
+            id={`bubbleMin1Grad_${uid}`}
+            x1="0%"
+            y1="0%"
+            x2="100%"
+            y2="100%"
+          >
+            <stop
+              offset="0%"
+              stopColor={activeTimerEntry ? ringHex : "#A78BFA"}
+            />
+            <stop
+              offset="100%"
+              stopColor={activeTimerEntry ? ringHexSoft : "#7C3AED"}
+            />
+          </linearGradient>
+
+          <linearGradient
+            id={`bubbleMin2Grad_${uid}`}
+            x1="0%"
+            y1="0%"
+            x2="100%"
+            y2="100%"
+          >
+            <stop
+              offset="0%"
+              stopColor={activeTimerEntry ? ringHexSoft : "#C084FC"}
+            />
+            <stop
+              offset="100%"
+              stopColor={activeTimerEntry ? ringHex : "#9333EA"}
+            />
+          </linearGradient>
+
+          <filter
+            id={`ringGlow_${uid}`}
+            x="-15%"
+            y="-15%"
+            width="130%"
+            height="130%"
+          >
+            <feGaussianBlur stdDeviation="3.5" result="blur" />
+            <feComposite in="SourceGraphic" in2="blur" operator="over" />
+          </filter>
+        </defs>
+
+        {/* 2.5D Lower 3D Depth Extrusion Lip */}
+        <rect
+          x="3"
+          y="7"
+          width="248"
+          height="135"
+          rx="34"
+          fill="#040406"
         />
 
-        <svg
-          width="168"
-          height="176"
-          viewBox="0 0 168 176"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-          className={`overflow-visible transition-all duration-200 ${
+        {/* 3D Titanium Outer Body */}
+        <rect
+          x="3"
+          y="3"
+          width="248"
+          height="136"
+          rx="34"
+          fill={`url(#standbyBezel_${uid})`}
+          stroke={
             isStringTargetHighlighted
-              ? "drop-shadow-[0_0_18px_rgba(239,68,68,0.85)]"
-              : isRinging
-              ? "drop-shadow-[0_0_24px_rgba(251,191,36,0.85)]"
-              : "drop-shadow-[0_14px_22px_rgba(0,0,0,0.45)]"
-          }`}
-        >
-          <defs>
-            {/* 3D Brushed Brass Gradient for Bells, Plunger, and Legs */}
-            <linearGradient id={`brass_${uid}`} x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#FEF08A" />
-              <stop offset="30%" stopColor="#FACC15" />
-              <stop offset="68%" stopColor="#CA8A04" />
-              <stop offset="100%" stopColor="#713F12" />
-            </linearGradient>
+              ? "#EF4444"
+              : "rgba(255,255,255,0.18)"
+          }
+          strokeWidth={isStringTargetHighlighted ? "2.5" : "1.2"}
+        />
 
-            {/* 3D Matte Charcoal / Vintage Cream Outer Clock Case */}
-            <linearGradient id={`caseOuter_${uid}`} x1="24" y1="30" x2="144" y2="152" gradientUnits="userSpaceOnUse">
-              <stop offset="0%" stopColor="#475569" />
-              <stop offset="25%" stopColor="#334155" />
-              <stop offset="70%" stopColor="#1E293B" />
-              <stop offset="100%" stopColor="#0F172A" />
-            </linearGradient>
+        {/* Top Physical Hardware Side Button Detail (like iPhone StandBy top edge) */}
+        <rect
+          x="64"
+          y="0.5"
+          width="26"
+          height="2.5"
+          rx="1.2"
+          fill="#52525B"
+        />
 
-            {/* Metallic Inner Bezel Ring */}
-            <linearGradient id={`bezelRing_${uid}`} x1="30" y1="36" x2="138" y2="144" gradientUnits="userSpaceOnUse">
-              <stop offset="0%" stopColor="#F8FAFC" />
-              <stop offset="45%" stopColor="#94A3B8" />
-              <stop offset="100%" stopColor="#334155" />
-            </linearGradient>
+        {/* Deep Pitch-Black OLED Screen Display */}
+        <rect
+          x="9"
+          y="9"
+          width="236"
+          height="124"
+          rx="29"
+          fill="#050507"
+        />
 
-            {/* Warm Ivory Paper-Like Clock Dial Face */}
-            <radialGradient
-              id={`dialFace_${uid}`}
-              cx="0"
-              cy="0"
-              r="1"
-              gradientUnits="userSpaceOnUse"
-              gradientTransform="translate(76 80) scale(56)"
-            >
-              <stop offset="0%" stopColor="#FFFBEB" />
-              <stop offset="75%" stopColor="#FEF3C7" />
-              <stop offset="100%" stopColor="#FDE68A" />
-            </radialGradient>
-          </defs>
-
-          {/* Left & Right 3D Angled Brass Support Legs */}
-          <path
-            d="M50 138 L37 160"
-            stroke={`url(#brass_${uid})`}
-            strokeWidth="7.5"
-            strokeLinecap="round"
-          />
-          <path
-            d="M118 138 L131 160"
-            stroke={`url(#brass_${uid})`}
-            strokeWidth="7.5"
-            strokeLinecap="round"
-          />
-          {/* Rubber Foot Caps */}
-          <circle cx="36" cy="161" r="4" fill="#1E293B" />
-          <circle cx="132" cy="161" r="4" fill="#1E293B" />
-
-          {/* Top-Center Brass Plunger / Mode & Stop Alarm Button (Also anchor for red detective strings!) */}
-          <g
-            data-no-drag="true"
-            onClick={handleTopPlungerClick}
-            className="cursor-pointer"
-          >
-            <title>
-              {isRinging
-                ? "Alarmı Sustur"
-                : mode === "clock"
-                ? "Zamanlayıcı Moduna Geç"
-                : "Saat Moduna Geç"}
-            </title>
+        {/* Post-it Note Color Timer Progress Ring around the StandBy Bezel! */}
+        {activeTimerEntry && (
+          <>
+            {/* Subtle background track in note's color */}
             <rect
-              x="79"
-              y="13"
-              width="10"
-              height="16"
-              rx="3"
-              fill={`url(#brass_${uid})`}
-            />
-            <rect
-              x="73"
-              y="8"
-              width="22"
-              height="7"
-              rx="3.5"
-              fill={`url(#brass_${uid})`}
-              stroke="#713F12"
-              strokeWidth="0.8"
-            />
-            {/* Red detective string loop if any Post-it is tied to the clock */}
-            {linkedNoteCount > 0 && (
-              <circle
-                cx="84"
-                cy="16"
-                r="5.5"
-                fill="none"
-                stroke="#DC2626"
-                strokeWidth="2.6"
-              />
-            )}
-          </g>
-
-          {/* Center Hammer between the Twin Bells (Vibrates rapidly when ringing!) */}
-          <motion.g
-            animate={
-              isRinging
-                ? { rotate: [-22, 22, -22, 22, 0] }
-                : { rotate: 0 }
-            }
-            transition={
-              isRinging ? { duration: 0.14, repeat: Infinity } : { duration: 0.2 }
-            }
-            style={{ originX: "84px", originY: "34px" }}
-          >
-            <line
-              x1="84"
-              y1="34"
-              x2="84"
-              y2="21"
-              stroke="#CBD5E1"
-              strokeWidth="2.5"
-            />
-            <circle cx="84" cy="20" r="4" fill={`url(#brass_${uid})`} />
-          </motion.g>
-
-          {/* Left 3D Brass Twin Bell Dome */}
-          <g transform="translate(36, 22) rotate(-34)">
-            <line x1="0" y1="8" x2="0" y2="18" stroke="#94A3B8" strokeWidth="3" />
-            <path
-              d="M-20 10 C-20 -3 -11 -10 0 -10 C11 -10 20 -3 20 10 Z"
-              fill={`url(#brass_${uid})`}
-              stroke="#713F12"
-              strokeWidth="1"
-            />
-            <ellipse cx="0" cy="-11" rx="3" ry="2" fill="#FEF08A" />
-          </g>
-
-          {/* Right 3D Brass Twin Bell Dome */}
-          <g transform="translate(132, 22) rotate(34)">
-            <line x1="0" y1="8" x2="0" y2="18" stroke="#94A3B8" strokeWidth="3" />
-            <path
-              d="M-20 10 C-20 -3 -11 -10 0 -10 C11 -10 20 -3 20 10 Z"
-              fill={`url(#brass_${uid})`}
-              stroke="#713F12"
-              strokeWidth="1"
-            />
-            <ellipse cx="0" cy="-11" rx="3" ry="2" fill="#FEF08A" />
-          </g>
-
-          {/* 3D Outer Cylindrical Clock Case Shadow Depth */}
-          <circle cx="84" cy="94" r="58" fill="#090D16" />
-
-          {/* Main 3D Clock Case Body */}
-          <circle
-            cx="84"
-            cy="90"
-            r="58"
-            fill={`url(#caseOuter_${uid})`}
-            stroke="#64748B"
-            strokeWidth="1.5"
-          />
-
-          {/* Metallic Inner Bezel Ring */}
-          <circle cx="84" cy="90" r="51" fill={`url(#bezelRing_${uid})`} />
-
-          {/* Warm Ivory Clock Dial Face */}
-          <circle
-            cx="84"
-            cy="90"
-            r="47.5"
-            fill={`url(#dialFace_${uid})`}
-            stroke="#D97706"
-            strokeWidth="1"
-          />
-
-          {/* Countdown Active Progress Ring around the Dial */}
-          {(mode === "timer" || isRunning || isRinging) && (
-            <circle
-              cx="84"
-              cy="90"
-              r="45"
+              x="6"
+              y="6"
+              width="242"
+              height="130"
+              rx="31"
               fill="none"
-              stroke={isRinging ? "#E11D48" : "#F59E0B"}
-              strokeWidth="3.5"
-              strokeLinecap="round"
-              strokeDasharray={circumference}
-              strokeDashoffset={dashOffset}
-              transform="rotate(-90 84 90)"
+              stroke={ringHex}
+              strokeOpacity="0.2"
+              strokeWidth="4"
             />
-          )}
+            {/* Glowing animated progress frame filling around the StandBy clock */}
+            <rect
+              x="6"
+              y="6"
+              width="242"
+              height="130"
+              rx="31"
+              fill="none"
+              stroke={ringHex}
+              strokeWidth={isRinging ? "5.5" : "4.2"}
+              strokeLinecap="round"
+              strokeDasharray={rectPerimeter}
+              strokeDashoffset={isRinging ? 0 : dashOffset}
+              filter={`url(#ringGlow_${uid})`}
+            />
+          </>
+        )}
 
-          {/* 12 Hour Tick Marks around the Dial */}
-          {Array.from({ length: 12 }).map((_, i) => {
-            const angle = (i * 30 * Math.PI) / 180;
-            const isMajor = i % 3 === 0;
-            const rOuter = 43.5;
-            const rInner = isMajor ? 36.5 : 39.5;
-            const x1 = 84 + rInner * Math.sin(angle);
-            const y1 = 90 - rInner * Math.cos(angle);
-            const x2 = 84 + rOuter * Math.sin(angle);
-            const y2 = 90 - rOuter * Math.cos(angle);
-            return (
+        {/* =========================================================
+            FACE MODE 1: iOS StandBy Analog Mode (Image 1)
+           ========================================================= */}
+        {faceMode === "analog" && (
+          <g>
+            {/* 60 Radial Rectangular Perimeter Tick Marks */}
+            {STANDBY_TICKS.map((t) => (
               <line
-                key={i}
-                x1={x1}
-                y1={y1}
-                x2={x2}
-                y2={y2}
-                stroke={isMajor ? "#1E293B" : "#64748B"}
-                strokeWidth={isMajor ? "2.4" : "1.4"}
+                key={t.i}
+                x1={t.x1}
+                y1={t.y1}
+                x2={t.x2}
+                y2={t.y2}
+                stroke={
+                  t.isCardinal
+                    ? "#BDBDC2"
+                    : t.isHourTick
+                    ? "#8E8E93"
+                    : "#3A3A3C"
+                }
+                strokeWidth={t.isCardinal ? "2.2" : t.isHourTick ? "1.8" : "1.1"}
                 strokeLinecap="round"
               />
-            );
-          })}
+            ))}
 
-          {/* Digital Sub-Dial Readout (Shows Countdown MM:SS or Digital Clock HH:MM) */}
-          <rect
-            x="58"
-            y="102"
-            width="52"
-            height="17"
-            rx="5"
-            fill="#1E293B"
-            stroke="#94A3B8"
-            strokeWidth="0.8"
-          />
-          <text
-            x="84"
-            y="113.8"
-            textAnchor="middle"
-            fill={isRinging ? "#FDA4AF" : mode === "timer" || isRunning ? "#FDE047" : "#F8FAFC"}
-            fontSize="10.5"
-            fontWeight="800"
-            fontFamily="ui-monospace, SFMono-Regular, Consolas, monospace"
-          >
-            {mode === "timer" || isRunning || isRinging
-              ? formatCountdown(remainingSeconds)
-              : `${String(now.getHours()).padStart(2, "0")}:${String(
-                  now.getMinutes()
-                ).padStart(2, "0")}`}
-          </text>
-
-          {/* Analog Hour Hand */}
-          <g transform={`rotate(${hourDeg} 84 90)`}>
-            <line
-              x1="84"
-              y1="93"
-              x2="84"
-              y2="64"
-              stroke="#0F172A"
-              strokeWidth="4"
-              strokeLinecap="round"
-            />
-          </g>
-
-          {/* Analog Minute Hand */}
-          <g transform={`rotate(${minuteDeg} 84 90)`}>
-            <line
-              x1="84"
-              y1="94"
-              x2="84"
-              y2="54"
-              stroke="#1E293B"
-              strokeWidth="2.8"
-              strokeLinecap="round"
-            />
-          </g>
-
-          {/* Braun-inspired Orange Second Hand */}
-          <g transform={`rotate(${secondDeg} 84 90)`}>
-            <line
-              x1="84"
-              y1="98"
-              x2="84"
-              y2="50"
-              stroke="#EA580C"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            />
-            <circle cx="84" cy="90" r="3.5" fill="#EA580C" />
-            <circle cx="84" cy="90" r="1.4" fill="#FFFBEB" />
-          </g>
-
-          {/* Curved Glass Lens Specular Reflection */}
-          <path
-            d="M47 68 C55 49 77 43 99 48 C83 50 61 59 47 68 Z"
-            fill="#FFFFFF"
-            fillOpacity="0.4"
-            pointerEvents="none"
-          />
-        </svg>
-
-        {/* Compact Tactile Brass & Charcoal Timer Control Strip under the Clock Feet */}
-        <div
-          data-no-drag="true"
-          className=" -mt-2 flex items-center gap-1 px-2 py-1 rounded-2xl bg-neutral-900/95 border border-amber-400/30 shadow-xl text-white"
-        >
-          {isRinging ? (
-            <button
-              type="button"
-              onClick={() => {
-                setIsRinging(false);
-                setRemainingSeconds(totalSeconds);
-              }}
-              className="flex items-center gap-1 px-3 py-0.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold cursor-pointer animate-pulse"
+            {/* 12, 3, 6, 9 StandBy Wide Typography Numerals */}
+            <text
+              x="127"
+              y="39"
+              textAnchor="middle"
+              fill="#FFFFFF"
+              fontSize="21"
+              fontWeight="800"
+              letterSpacing="-0.5"
+              fontFamily="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif"
             >
-              <BellOff className="w-3.5 h-3.5" />
-              <span>Alarmı Sustur</span>
-            </button>
-          ) : (
-            <>
-              {[1, 5, 15, 25].map((m) => {
-                const isSelected = mode === "timer" && totalSeconds === m * 60;
-                return (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => selectPresetMinutes(m)}
-                    title={`${m} Dakika Zamanlayıcı Başlat`}
-                    className={`px-1.5 py-0.5 rounded-lg text-[10px] font-bold transition cursor-pointer ${
-                      isSelected
-                        ? "bg-amber-400 text-neutral-950"
-                        : "bg-white/10 hover:bg-white/20 text-neutral-200"
-                    }`}
-                  >
-                    {m}d
-                  </button>
-                );
-              })}
+              12
+            </text>
+            <text
+              x="202"
+              y="79"
+              textAnchor="middle"
+              fill="#FFFFFF"
+              fontSize="21"
+              fontWeight="800"
+              fontFamily="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif"
+            >
+              3
+            </text>
+            <text
+              x="127"
+              y="117"
+              textAnchor="middle"
+              fill="#FFFFFF"
+              fontSize="21"
+              fontWeight="800"
+              fontFamily="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif"
+            >
+              6
+            </text>
+            <text
+              x="52"
+              y="79"
+              textAnchor="middle"
+              fill="#FFFFFF"
+              fontSize="21"
+              fontWeight="800"
+              fontFamily="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif"
+            >
+              9
+            </text>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setMode("timer");
-                  if (remainingSeconds <= 0) {
-                    setRemainingSeconds(totalSeconds || 300);
-                  }
-                  setIsRunning((prev) => !prev);
-                }}
-                title={isRunning ? "Duraklat" : "Başlat"}
-                className="p-1 rounded-lg bg-amber-400 hover:bg-amber-300 text-neutral-950 cursor-pointer transition"
-              >
-                {isRunning ? (
-                  <Pause className="w-3 h-3 fill-current" />
-                ) : (
-                  <Play className="w-3 h-3 fill-current" />
-                )}
-              </button>
-
-              {(isRunning || mode === "timer") && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsRunning(false);
-                    setIsRinging(false);
-                    setRemainingSeconds(totalSeconds);
-                    setMode("clock");
-                  }}
-                  title="Sıfırla ve Saat Moduna Dön"
-                  className="p-1 rounded-lg bg-white/10 hover:bg-white/20 text-neutral-300 cursor-pointer transition"
+            {/* Left Side Complication: Active @Timer Countdown / Target Time (Like ⏰ 5:30AM in Image 1) */}
+            {activeTimerEntry ? (
+              <g transform="translate(67, 72)">
+                <circle cx="4" cy="-3" r="4.2" fill={ringHex} />
+                <path
+                  d="M4 -5.2 L4 -3 L5.6 -2"
+                  stroke="#050507"
+                  strokeWidth="1.2"
+                  strokeLinecap="round"
+                />
+                <text
+                  x="11"
+                  y="0.5"
+                  fill={ringHexSoft}
+                  fontSize="9.5"
+                  fontWeight="800"
+                  fontFamily="ui-monospace, SFMono-Regular, Consolas, monospace"
                 >
-                  <RotateCcw className="w-3 h-3" />
-                </button>
-              )}
-            </>
-          )}
-        </div>
-      </div>
+                  {isRinging
+                    ? "SÜRE DOLDU!"
+                    : formatRemainingTime(activeTimerEntry.remainingMs)}
+                </text>
+              </g>
+            ) : (
+              <g transform="translate(70, 72)">
+                <circle cx="4" cy="-3" r="3.8" fill="#F59E0B" opacity="0.85" />
+                <text
+                  x="11"
+                  y="0.5"
+                  fill="#A1A1AA"
+                  fontSize="9"
+                  fontWeight="700"
+                  fontFamily="-apple-system, BlinkMacSystemFont, sans-serif"
+                >
+                  {`${hourStr}:${minStr}`}
+                </text>
+              </g>
+            )}
+
+            {/* Right Side Complication: Day of Week in Red + Date in White (Like WED 19 in Image 1) */}
+            <text
+              x="184"
+              y="72.5"
+              textAnchor="end"
+              fontSize="9.5"
+              fontWeight="800"
+              fontFamily="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif"
+            >
+              <tspan fill="#EF4444">{dayName} </tspan>
+              <tspan fill="#FFFFFF">{dayNumber}</tspan>
+            </text>
+
+            {/* Analog Hour Hand (StandBy White Pill with thin neck) */}
+            <g transform={`rotate(${hourDeg} 127 72)`}>
+              <line
+                x1="127"
+                y1="72"
+                x2="127"
+                y2="62"
+                stroke="#FFFFFF"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+              />
+              <rect
+                x="123.8"
+                y="43"
+                width="6.4"
+                height="22"
+                rx="3.2"
+                fill="#FFFFFF"
+              />
+            </g>
+
+            {/* Analog Minute Hand (StandBy Longer White Pill with thin neck) */}
+            <g transform={`rotate(${minuteDeg} 127 72)`}>
+              <line
+                x1="127"
+                y1="72"
+                x2="127"
+                y2="60"
+                stroke="#FFFFFF"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+              />
+              <rect
+                x="124.2"
+                y="26"
+                width="5.6"
+                height="37"
+                rx="2.8"
+                fill="#FFFFFF"
+              />
+            </g>
+
+            {/* Sweeping Orange Second Hand (Image 1 Signature Orange Needle) */}
+            <g transform={`rotate(${secondDeg} 127 72)`}>
+              <line
+                x1="127"
+                y1="83"
+                x2="127"
+                y2="20"
+                stroke={activeTimerEntry ? ringHex : "#F97316"}
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+              <circle
+                cx="127"
+                cy="72"
+                r="3.6"
+                fill="#FFFFFF"
+              />
+              <circle
+                cx="127"
+                cy="72"
+                r="2"
+                fill={activeTimerEntry ? ringHex : "#F97316"}
+              />
+            </g>
+          </g>
+        )}
+
+        {/* =========================================================
+            FACE MODE 2: iOS StandBy Bubble Digital Mode (Image 2)
+           ========================================================= */}
+        {faceMode === "bubble" && (
+          <g>
+            {/* Large Playful Bubble Hour Digits */}
+            <text
+              x="60"
+              y="102"
+              textAnchor="middle"
+              fill={`url(#bubbleHourGrad_${uid})`}
+              fontSize="76"
+              fontWeight="900"
+              letterSpacing="-4"
+              style={{ filter: "drop-shadow(0 6px 10px rgba(0,0,0,0.45))" }}
+              fontFamily="-apple-system, BlinkMacSystemFont, 'SF Pro Rounded', 'Arial Rounded MT Bold', sans-serif"
+            >
+              {hourStr}
+            </text>
+
+            {/* 3D Floating Colon Spheres in Center (Image 2) */}
+            <circle cx="117" cy="56" r="8.5" fill="#71717A" fillOpacity="0.85" />
+            <circle
+              cx="117"
+              cy="86"
+              r="8.5"
+              fill="#D4D4D8"
+              fillOpacity="0.9"
+            />
+
+            {/* Large Playful Bubble Minute First Digit */}
+            <text
+              x="158"
+              y="102"
+              textAnchor="middle"
+              fill={`url(#bubbleMin1Grad_${uid})`}
+              fontSize="76"
+              fontWeight="900"
+              transform="rotate(-3 158 72)"
+              style={{ filter: "drop-shadow(0 6px 12px rgba(0,0,0,0.5))" }}
+              fontFamily="-apple-system, BlinkMacSystemFont, 'SF Pro Rounded', 'Arial Rounded MT Bold', sans-serif"
+            >
+              {minStr[0]}
+            </text>
+
+            {/* Large Playful Bubble Minute Second Digit */}
+            <text
+              x="208"
+              y="102"
+              textAnchor="middle"
+              fill={`url(#bubbleMin2Grad_${uid})`}
+              fontSize="76"
+              fontWeight="900"
+              transform="rotate(3 208 72)"
+              style={{ filter: "drop-shadow(0 6px 12px rgba(0,0,0,0.5))" }}
+              fontFamily="-apple-system, BlinkMacSystemFont, 'SF Pro Rounded', 'Arial Rounded MT Bold', sans-serif"
+            >
+              {minStr[1]}
+            </text>
+
+            {/* Active Note Timer Overlay Pill in Bubble Mode */}
+            {activeTimerEntry && (
+              <g transform="translate(127, 23)">
+                <rect
+                  x="-46"
+                  y="-9"
+                  width="92"
+                  height="18"
+                  rx="9"
+                  fill="rgba(9,9,11,0.88)"
+                  stroke={ringHex}
+                  strokeWidth="1.3"
+                />
+                <text
+                  x="0"
+                  y="3.5"
+                  textAnchor="middle"
+                  fill={ringHexSoft}
+                  fontSize="10"
+                  fontWeight="800"
+                  fontFamily="ui-monospace, SFMono-Regular, Consolas, monospace"
+                >
+                  {isRinging
+                    ? "⏰ SÜRE DOLDU!"
+                    : `⏰ ${formatRemainingTime(activeTimerEntry.remainingMs)}`}
+                </text>
+              </g>
+            )}
+          </g>
+        )}
+
+        {/* Subtle Curved Glass Specular Sheen */}
+        <path
+          d="M24 12 L230 12 C239 12 243 17 243 24 C180 18 75 18 11 24 C11 17 15 12 24 12 Z"
+          fill="#FFFFFF"
+          fillOpacity="0.08"
+          pointerEvents="none"
+        />
+      </svg>
     </motion.div>
   );
 }

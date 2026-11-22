@@ -266,7 +266,38 @@ function tryApplyLiveMarkdown() {
     return true;
   }
 
-  // 6. Interactive Todo Checkbox shortcut: "[] ", "[ ] ", "- [] ", "- [ ] ", "[x] "
+  // 6. Timer / Alarm expression: "@25d ", "@15dk ", "@30s ", "@30sn ", "@19.20 ", "@19:20 "
+  const timerMatch = beforeRaw.match(
+    /(?:^|\s)@(\d{1,2}[.:]\d{2}|\d{1,3}\s*(?:dk|d|min|m|sn|s|sa|h))\s$/i
+  );
+  if (timerMatch) {
+    const rawExpr = timerMatch[1].trim();
+    const fullMatched = timerMatch[0];
+    const leadingSpace = fullMatched.startsWith(" ") ? " " : "";
+    const startIdx = beforeRaw.length - fullMatched.length + leadingSpace.length;
+    const prefix = beforeRaw.slice(0, startIdx);
+
+    anchorNode.nodeValue = prefix;
+    const chip = document.createElement("span");
+    chip.setAttribute("data-timer-chip", "true");
+    chip.setAttribute("data-timer-expr", rawExpr);
+    chip.setAttribute("contenteditable", "false");
+    chip.className =
+      "inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 rounded-lg bg-neutral-900/85 text-amber-300 font-bold text-[11.5px] shadow-xs border border-amber-400/40 select-none align-baseline";
+    chip.textContent = `⏰ ${rawExpr}`;
+
+    const parent = anchorNode.parentNode;
+    if (anchorNode.nextSibling) {
+      parent.insertBefore(chip, anchorNode.nextSibling);
+    } else {
+      parent.appendChild(chip);
+    }
+
+    placeCaretAfterElement(chip, afterRaw);
+    return true;
+  }
+
+  // 7. Interactive Todo Checkbox shortcut: "[] ", "[ ] ", "- [] ", "- [ ] ", "[x] "
   const cleanBefore = beforeRaw.replace(/^\u200B+/, "");
   const todoMatch = cleanBefore.match(/^(?:-\s+|\*\s+|•\s+)?\[([ xX]?)\]\s$/);
   if (todoMatch && !anchorNode.parentElement?.closest('[data-todo-item="true"]')) {
