@@ -4,6 +4,12 @@ import { Sparkles, ArrowUpRight, GripHorizontal, Minus } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { POSTIT_COLORS, COLOR_LIST, NOTE_SIZE_LIMITS } from "../hooks/useNotesStore";
 import MarkdownEditor from "./MarkdownEditor";
+import { CrumpledPaperCreases } from "./PinnedNote";
+
+const CRUMPLED_CLIP_PATH =
+  "polygon(14% 6%, 39% 1%, 66% 5%, 89% 13%, 98% 36%, 93% 67%, 85% 91%, 59% 98%, 31% 94%, 11% 85%, 2% 58%, 5% 27%)";
+const NORMAL_CLIP_PATH =
+  "polygon(0% 0%, 50% 0%, 100% 0%, 100% 25%, 100% 50%, 100% 75%, 100% 100%, 50% 100%, 25% 100%, 0% 100%, 0% 50%, 0% 25%)";
 
 const STACK_ORIGIN = { x: 36, y: 36 };
 // Magnetic pull break distance: inside this radius the sheet resists like a magnet;
@@ -26,6 +32,8 @@ export default function StickyStack({
   const [rawOffset, setRawOffset] = useState({ x: 0, y: 0 });
   const [isSnappedFree, setIsSnappedFree] = useState(false);
   const [isDiscarding, setIsDiscarding] = useState(false);
+  const [isOverTrashLocal, setIsOverTrashLocal] = useState(false);
+  const [isOverBasketLocal, setIsOverBasketLocal] = useState(false);
 
   const dragStartRef = useRef(null);
   const snappedFreeRef = useRef(false);
@@ -109,12 +117,14 @@ export default function StickyStack({
 
       setRawOffset({ x: dx, y: dy });
 
-      onDragStateChange?.({
+      const status = onDragStateChange?.({
         isDragging: true,
         source: "stack",
         clientX: e.clientX,
         clientY: e.clientY,
       });
+      setIsOverTrashLocal(Boolean(status?.isOverTrash));
+      setIsOverBasketLocal(Boolean(status?.isOverBasket));
     };
 
     const handlePointerUp = (e) => {
@@ -136,11 +146,15 @@ export default function StickyStack({
         setTimeout(() => {
           onDiscardDraft?.();
           setIsDiscarding(false);
+          setIsOverTrashLocal(false);
+          setIsOverBasketLocal(false);
           setIsTearing(false);
           setIsSnappedFree(false);
           setRawOffset({ x: 0, y: 0 });
-        }, 220);
+        }, 260);
       } else if (dropResult?.droppedInBasket) {
+        setIsOverTrashLocal(false);
+        setIsOverBasketLocal(false);
         onTearOffPin?.({
           x: 340,
           y: 120,
@@ -152,7 +166,8 @@ export default function StickyStack({
         setIsSnappedFree(false);
         setRawOffset({ x: 0, y: 0 });
       } else if (snappedFreeRef.current) {
-        // Magnetic bond was broken -> pin at (finalX, finalY)
+        setIsOverTrashLocal(false);
+        setIsOverBasketLocal(false);
         onTearOffPin?.({
           x: finalX,
           y: finalY,
@@ -163,7 +178,8 @@ export default function StickyStack({
         setIsSnappedFree(false);
         setRawOffset({ x: 0, y: 0 });
       } else {
-        // Still captured by stack's magnetic force -> snap back to stack
+        setIsOverTrashLocal(false);
+        setIsOverBasketLocal(false);
         setIsTearing(false);
         setIsSnappedFree(false);
         setRawOffset({ x: 0, y: 0 });
@@ -282,21 +298,29 @@ export default function StickyStack({
             animate={
               isDiscarding
                 ? {
-                    x: window.innerWidth - STACK_ORIGIN.x - 120,
-                    y: window.innerHeight - STACK_ORIGIN.y - 120,
-                    scale: 0.15,
-                    rotate: 35,
+                    x: window.innerWidth - STACK_ORIGIN.x - 155,
+                    y: window.innerHeight - STACK_ORIGIN.y - 165,
+                    scale: 0.16,
+                    rotate: 160,
                     opacity: 0,
                   }
                 : {
                     x: visualOffset.x,
                     y: visualOffset.y,
-                    scale: isSnappedFree
+                    scale: isOverTrashLocal
+                      ? 0.52
+                      : isOverBasketLocal
+                      ? 0.75
+                      : isSnappedFree
                       ? 1.07
                       : isTearing
                       ? 1 - magnetTension * 0.035
                       : 1,
-                    rotate: isTearing
+                    rotate: isOverTrashLocal
+                      ? 24
+                      : isOverBasketLocal
+                      ? -8
+                      : isTearing
                       ? Math.max(-10, Math.min(10, visualOffset.x * 0.045))
                       : 0,
                     opacity: 1,
@@ -305,20 +329,27 @@ export default function StickyStack({
             transition={
               isTearing
                 ? {
-                    // Quick spring so the moment isSnappedFree flips true, the card leaps from the magnet to the cursor!
                     x: { type: "spring", stiffness: 620, damping: 32, mass: 0.5 },
                     y: { type: "spring", stiffness: 620, damping: 32, mass: 0.5 },
-                    scale: { type: "spring", stiffness: 520, damping: 22 },
-                    rotate: { type: "spring", stiffness: 450, damping: 26 },
+                    scale: { type: "spring", stiffness: 450, damping: 22 },
+                    rotate: { type: "spring", stiffness: 420, damping: 24 },
                   }
                 : { type: "spring", stiffness: 420, damping: 25 }
             }
+            style={{
+              clipPath:
+                isOverTrashLocal || isDiscarding
+                  ? CRUMPLED_CLIP_PATH
+                  : NORMAL_CLIP_PATH,
+              transition: "clip-path 200ms cubic-bezier(0.34, 1.56, 0.64, 1)",
+            }}
             className={`absolute inset-0 rounded-3xl ${activeTheme.bodyBg} ${activeTheme.border} border-2 paper-texture flex flex-col justify-between transition-shadow duration-200 ${
               isSnappedFree
                 ? "shadow-[0_28px_60px_-10px_rgba(0,0,0,0.45)] ring-2 ring-black/10"
                 : "shadow-[0_14px_30px_-8px_rgba(0,0,0,0.25)]"
             } ${isTearing ? "cursor-grabbing z-50" : "cursor-grab"}`}
           >
+            <CrumpledPaperCreases isCrumpled={isOverTrashLocal || isDiscarding} />
             {/* Top Adhesive Strip */}
             <div
               className={`h-9 w-full rounded-t-[22px] ${activeTheme.stripBg} border-b ${activeTheme.border} px-3 flex items-center justify-between transition-colors duration-200`}

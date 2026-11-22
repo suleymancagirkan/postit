@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { GripHorizontal } from "lucide-react";
 import {
   POSTIT_COLORS,
@@ -9,16 +9,121 @@ import {
 } from "../hooks/useNotesStore";
 import MarkdownEditor from "./MarkdownEditor";
 
+// Irregular 12-point polygon clip-path that gives a realistic crumpled paper ball silhouette
+const CRUMPLED_CLIP_PATH =
+  "polygon(14% 6%, 39% 1%, 66% 5%, 89% 13%, 98% 36%, 93% 67%, 85% 91%, 59% 98%, 31% 94%, 11% 85%, 2% 58%, 5% 27%)";
+const NORMAL_CLIP_PATH =
+  "polygon(0% 0%, 50% 0%, 100% 0%, 100% 25%, 100% 50%, 100% 75%, 100% 100%, 50% 100%, 25% 100%, 0% 100%, 0% 50%, 0% 25%)";
+
+/**
+ * 3D Multi-Faceted Crumpled Paper Crease Overlay
+ * Renders realistic triangular paper folds, sharp crease highlights, and deep valley shadows
+ * when the Post-it note approaches the Trash Can.
+ */
+export function CrumpledPaperCreases({ isCrumpled }) {
+  return (
+    <AnimatePresence>
+      {isCrumpled && (
+        <motion.div
+          initial={{ opacity: 0, scale: 1.08 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 1.05 }}
+          transition={{ duration: 0.18 }}
+          className="pointer-events-none absolute inset-0 z-40 overflow-hidden"
+        >
+          <svg
+            width="100%"
+            height="100%"
+            viewBox="0 0 200 200"
+            preserveAspectRatio="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            {/* Dark Valley Facets (Simulated 3D folded paper planes) */}
+            <polygon
+              points="0,0 82,36 34,94"
+              fill="rgba(0,0,0,0.16)"
+            />
+            <polygon
+              points="200,0 128,58 172,112"
+              fill="rgba(0,0,0,0.22)"
+            />
+            <polygon
+              points="82,36 128,58 98,118 34,94"
+              fill="rgba(0,0,0,0.12)"
+            />
+            <polygon
+              points="34,94 98,118 62,178 0,145"
+              fill="rgba(0,0,0,0.24)"
+            />
+            <polygon
+              points="98,118 172,112 200,175 118,200 62,178"
+              fill="rgba(0,0,0,0.18)"
+            />
+
+            {/* Bright Ridge Facets (Light catching folded paper edges) */}
+            <polygon
+              points="82,36 200,0 128,58"
+              fill="rgba(255,255,255,0.28)"
+            />
+            <polygon
+              points="0,0 34,94 0,145"
+              fill="rgba(255,255,255,0.22)"
+            />
+            <polygon
+              points="128,58 172,112 98,118"
+              fill="rgba(255,255,255,0.25)"
+            />
+            <polygon
+              points="34,94 98,118 62,178"
+              fill="rgba(255,255,255,0.2)"
+            />
+
+            {/* Sharp Paper Fold Crease Lines */}
+            <g
+              stroke="rgba(0,0,0,0.28)"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <line x1="0" y1="0" x2="82" y2="36" />
+              <line x1="82" y1="36" x2="200" y2="0" />
+              <line x1="82" y1="36" x2="128" y2="58" />
+              <line x1="82" y1="36" x2="34" y2="94" />
+              <line x1="128" y1="58" x2="98" y2="118" />
+              <line x1="128" y1="58" x2="172" y2="112" />
+              <line x1="34" y1="94" x2="98" y2="118" />
+              <line x1="34" y1="94" x2="62" y2="178" />
+              <line x1="98" y1="118" x2="62" y2="178" />
+              <line x1="98" y1="118" x2="172" y2="112" />
+              <line x1="98" y1="118" x2="145" y2="195" />
+              <line x1="172" y1="112" x2="200" y2="165" />
+            </g>
+
+            {/* White Specular Ridge Highlights along the Creases */}
+            <g
+              stroke="rgba(255,255,255,0.65)"
+              strokeWidth="1.2"
+              strokeLinecap="round"
+            >
+              <line x1="83" y1="38" x2="127" y2="59" />
+              <line x1="36" y1="95" x2="97" y2="119" />
+              <line x1="99" y1="119" x2="170" y2="113" />
+              <line x1="81" y1="37" x2="35" y2="92" />
+              <line x1="97" y1="120" x2="63" y2="176" />
+            </g>
+          </svg>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
 /**
  * 2.5D Red-Headed & Grey-Metallic Push-Pin (Raptiye) SVG Component
- * - Unpinned: hovers tilted above the paper showing the full sharp metallic needle.
- * - Pinned: plunges into the paper, hiding the lower needle tip inside the puncture hole
- *   and casting a realistic contact shadow on the paper surface.
  */
 function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
   return (
     <div className="group relative flex flex-col items-center select-none">
-      {/* Hover-only subtle tooltip so there is no permanent box around the pin */}
       <div className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-neutral-900/90 px-2 py-0.5 text-[10px] font-medium text-white opacity-0 shadow-md transition-opacity duration-150 group-hover:opacity-100">
         {isPinned ? `📌 ${targetLabel} (Çıkarmak için tıkla)` : "Bu ekrana sapla"}
       </div>
@@ -49,7 +154,6 @@ function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
         className="pointer-events-none absolute rounded-full bg-black blur-[1.5px]"
       />
 
-      {/* Puncture hole on the paper when the needle is pushed in */}
       {isPinned && (
         <div
           style={{ top: 25 }}
@@ -57,7 +161,6 @@ function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
         />
       )}
 
-      {/* 2.5D Thumbtack Body */}
       <motion.div
         initial={false}
         animate={
@@ -93,37 +196,60 @@ function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
           className="overflow-visible"
         >
           <defs>
-            {/* Metallic Grey Needle Gradient */}
-            <linearGradient id="metalNeedle" x1="13" y1="18" x2="17" y2="33" gradientUnits="userSpaceOnUse">
+            <linearGradient
+              id="metalNeedle"
+              x1="13"
+              y1="18"
+              x2="17"
+              y2="33"
+              gradientUnits="userSpaceOnUse"
+            >
               <stop offset="0%" stopColor="#64748B" />
               <stop offset="35%" stopColor="#F1F5F9" />
               <stop offset="65%" stopColor="#94A3B8" />
               <stop offset="100%" stopColor="#334155" />
             </linearGradient>
 
-            {/* Metallic Collar Ring under the plastic body */}
-            <linearGradient id="metalCollar" x1="10" y1="18" x2="20" y2="21" gradientUnits="userSpaceOnUse">
+            <linearGradient
+              id="metalCollar"
+              x1="10"
+              y1="18"
+              x2="20"
+              y2="21"
+              gradientUnits="userSpaceOnUse"
+            >
               <stop offset="0%" stopColor="#94A3B8" />
               <stop offset="50%" stopColor="#F8FAFC" />
               <stop offset="100%" stopColor="#475569" />
             </linearGradient>
 
-            {/* 3D Red Plastic Lower Flange / Skirt */}
-            <linearGradient id="redFlange" x1="6" y1="13" x2="24" y2="20" gradientUnits="userSpaceOnUse">
+            <linearGradient
+              id="redFlange"
+              x1="6"
+              y1="13"
+              x2="24"
+              y2="20"
+              gradientUnits="userSpaceOnUse"
+            >
               <stop offset="0%" stopColor="#FB7185" />
               <stop offset="35%" stopColor="#E11D48" />
               <stop offset="85%" stopColor="#9F1239" />
               <stop offset="100%" stopColor="#881337" />
             </linearGradient>
 
-            {/* 3D Red Plastic Middle Neck */}
-            <linearGradient id="redNeck" x1="10" y1="7" x2="20" y2="16" gradientUnits="userSpaceOnUse">
+            <linearGradient
+              id="redNeck"
+              x1="10"
+              y1="7"
+              x2="20"
+              y2="16"
+              gradientUnits="userSpaceOnUse"
+            >
               <stop offset="0%" stopColor="#F43F5E" />
               <stop offset="45%" stopColor="#BE123C" />
               <stop offset="100%" stopColor="#881337" />
             </linearGradient>
 
-            {/* 3D Red Plastic Top Cap Dome */}
             <radialGradient
               id="redTopCap"
               cx="0"
@@ -139,7 +265,6 @@ function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
             </radialGradient>
           </defs>
 
-          {/* Grey Steel Needle (Shorter when plunged into the paper, full sharp point when unpinned) */}
           {isPinned ? (
             <path
               d="M13.7 19.5 L16.3 19.5 L15.6 25.2 C15.4 25.8 14.6 25.8 14.4 25.2 Z"
@@ -152,7 +277,6 @@ function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
             />
           )}
 
-          {/* Needle Specular Highlight Line */}
           <line
             x1="14.7"
             y1="20"
@@ -164,15 +288,12 @@ function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
             strokeLinecap="round"
           />
 
-          {/* Metallic Grey Base Collar */}
           <ellipse cx="15" cy="19.2" rx="4.2" ry="1.4" fill="url(#metalCollar)" />
 
-          {/* Lower Wide Red Plastic Flange (Base Skirt) */}
           <path
             d="M7.2 16.2 C7.2 13.6 10.6 12.2 15 12.2 C19.4 12.2 22.8 13.6 22.8 16.2 C22.8 18.2 19.5 19.5 15 19.5 C10.5 19.5 7.2 18.2 7.2 16.2 Z"
             fill="url(#redFlange)"
           />
-          {/* Flange Rim Highlight */}
           <path
             d="M8.4 15.8 C9.8 17.3 12.3 18 15 18 C17.7 18 20.2 17.3 21.6 15.8"
             stroke="#FDA4AF"
@@ -181,13 +302,11 @@ function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
             strokeLinecap="round"
           />
 
-          {/* Tapered Cylinder Neck */}
           <path
             d="M10.8 7.5 L19.2 7.5 L20.4 15.2 C20.4 16.6 18 17.5 15 17.5 C12 17.5 9.6 16.6 9.6 15.2 Z"
             fill="url(#redNeck)"
           />
 
-          {/* Neck Left Specular Reflection */}
           <path
             d="M11.6 8.3 L11.0 14.8"
             stroke="#FECDD3"
@@ -196,10 +315,8 @@ function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
             strokeLinecap="round"
           />
 
-          {/* Top Red Cap Head (3D Dome/Disk) */}
           <ellipse cx="15" cy="6.8" rx="6.6" ry="3.6" fill="url(#redTopCap)" />
 
-          {/* Top Cap Glossy Specular Highlight */}
           <ellipse
             cx="12.6"
             cy="5.4"
@@ -247,6 +364,9 @@ export default function PinnedNote({
   const theme = POSTIT_COLORS[note.color] || POSTIT_COLORS.yellow;
   const isPinnedToScreen = Boolean(note.pinnedTarget);
   const pinnedLabel = note.pinnedTarget?.label || "Masaüstü";
+
+  // Is the paper currently crumpled because it's hovering over or dropping into the trash can?
+  const isCrumpled = isOverTrashLocal || isBeingDeleted;
 
   useEffect(() => {
     if (!isDragging) {
@@ -391,22 +511,24 @@ export default function PinnedNote({
         isDrop: true,
       });
 
-      setIsOverTrashLocal(false);
-      setIsOverBasketLocal(false);
-
       if (dropStatus?.droppedInTrash) {
+        // Keep isOverTrashLocal true so the paper stays crumpled as a ball while dropping into the open trash mouth
         setIsBeingDeleted(true);
         setTimeout(() => {
           onDelete?.(note.id);
-        }, 230);
+        }, 280);
       } else if (dropStatus?.droppedInBasket) {
+        setIsOverTrashLocal(false);
+        setIsOverBasketLocal(false);
         setIsBeingStashed(true);
         setTimeout(() => {
           setIsBeingStashed(false);
           setIsDragging(false);
           onStashToBasket?.(note.id);
-        }, 220);
+        }, 240);
       } else {
+        setIsOverTrashLocal(false);
+        setIsOverBasketLocal(false);
         setLivePos({ x: finalX, y: finalY });
         onUpdate?.(note.id, { x: finalX, y: finalY });
         setIsDragging(false);
@@ -482,18 +604,18 @@ export default function PinnedNote({
       animate={
         isBeingDeleted
           ? {
-              x: window.innerWidth - 110,
-              y: window.innerHeight - 110,
-              scale: 0.1,
-              rotate: 42,
+              x: window.innerWidth - 155,
+              y: window.innerHeight - 165,
+              scale: 0.16,
+              rotate: 165,
               opacity: 0,
             }
           : isBeingStashed
           ? {
-              x: window.innerWidth - 110,
-              y: window.innerHeight - 280,
-              scale: 0.14,
-              rotate: -18,
+              x: window.innerWidth - 155,
+              y: window.innerHeight - 315,
+              scale: 0.2,
+              rotate: -12,
               opacity: 0,
             }
           : !actuallyVisible
@@ -507,20 +629,24 @@ export default function PinnedNote({
           : {
               x: livePos.x,
               y: livePos.y,
+              // When approaching the Trash Can, the card shrinks & crunches into a wrinkled paper ball (0.54)!
+              // When approaching the Storage Basket, it tilts neatly like a file card (0.76).
               scale: isDragging
-                ? isOverTrashLocal || isOverBasketLocal
-                  ? 0.86
+                ? isOverTrashLocal
+                  ? 0.52
+                  : isOverBasketLocal
+                  ? 0.75
                   : 1.05
                 : 1,
               rotate:
                 isDragging || isResizing
                   ? isOverTrashLocal
-                    ? 12
+                    ? 24
                     : isOverBasketLocal
                     ? -8
                     : 0
                   : note.rotation || 0,
-              opacity: isOverTrashLocal || isOverBasketLocal ? 0.88 : 1,
+              opacity: 1,
             }
       }
       transition={
@@ -528,13 +654,13 @@ export default function PinnedNote({
           ? {
               x: { type: "tween", duration: 0 },
               y: { type: "tween", duration: 0 },
-              scale: { type: "spring", stiffness: 400, damping: 26 },
-              rotate: { type: "spring", stiffness: 350, damping: 24 },
+              scale: { type: "spring", stiffness: 420, damping: 22 },
+              rotate: { type: "spring", stiffness: 360, damping: 20 },
             }
           : {
               type: "spring",
               stiffness: 380,
-              damping: 28,
+              damping: 26,
             }
       }
       style={{
@@ -544,26 +670,33 @@ export default function PinnedNote({
         width: liveSize.width,
         height: liveSize.height,
         pointerEvents: actuallyVisible ? "auto" : "none",
+        clipPath: isCrumpled ? CRUMPLED_CLIP_PATH : NORMAL_CLIP_PATH,
+        transition: "clip-path 200ms cubic-bezier(0.34, 1.56, 0.64, 1)",
       }}
       className={`fixed rounded-3xl ${theme.bodyBg} ${theme.border} border-2 paper-texture flex flex-col justify-between select-none transition-colors duration-200 ${
         isDragging
-          ? "shadow-[0_28px_60px_-12px_rgba(0,0,0,0.42)] cursor-grabbing ring-2 ring-black/10"
+          ? "shadow-[0_28px_60px_-12px_rgba(0,0,0,0.45)] cursor-grabbing ring-2 ring-black/10"
           : "shadow-[0_14px_28px_-6px_rgba(0,0,0,0.26)] cursor-grab hover:shadow-[0_18px_36px_-8px_rgba(0,0,0,0.32)]"
       }`}
     >
-      {/* Top-Center Realistic 2.5D Red-Headed & Metallic Grey Push-Pin (No box/border) */}
-      <button
-        type="button"
-        data-no-drag="true"
-        onClick={handleCenterPinClick}
-        className="absolute -top-4 left-1/2 -translate-x-1/2 z-30 bg-transparent border-0 p-0 outline-none cursor-pointer"
-      >
-        <RealisticThumbtack
-          isPinned={isPinnedToScreen}
-          pinPulse={pinPulse}
-          targetLabel={pinnedLabel}
-        />
-      </button>
+      {/* 3D Crumpled Paper Facets & Crease Lines when near Trash Can */}
+      <CrumpledPaperCreases isCrumpled={isCrumpled} />
+
+      {/* Top-Center Realistic 2.5D Red-Headed & Metallic Grey Push-Pin */}
+      {!isCrumpled && (
+        <button
+          type="button"
+          data-no-drag="true"
+          onClick={handleCenterPinClick}
+          className="absolute -top-4 left-1/2 -translate-x-1/2 z-30 bg-transparent border-0 p-0 outline-none cursor-pointer"
+        >
+          <RealisticThumbtack
+            isPinned={isPinnedToScreen}
+            pinPulse={pinPulse}
+            targetLabel={pinnedLabel}
+          />
+        </button>
+      )}
 
       {/* Top Adhesive Strip */}
       <div
@@ -580,8 +713,16 @@ export default function PinnedNote({
         )}
       </div>
 
-      {/* Editable Live Markdown Note Content */}
-      <div className="flex-1 p-3 pb-1.5 flex flex-col overflow-hidden" data-no-drag="true">
+      {/* Editable Live Markdown Note Content (scrunches inward when crumpled) */}
+      <div
+        style={{
+          transform: isCrumpled ? "scale(0.75) rotate(-8deg)" : "none",
+          filter: isCrumpled ? "blur(0.4px)" : "none",
+          transition: "transform 180ms ease, filter 180ms ease",
+        }}
+        className="flex-1 p-3 pb-1.5 flex flex-col overflow-hidden"
+        data-no-drag="true"
+      >
         <MarkdownEditor
           resetKey={note.id}
           value={note.text}
