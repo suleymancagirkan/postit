@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import { GripHorizontal } from "lucide-react";
+import { GripHorizontal, Pin, Monitor, AppWindow } from "lucide-react";
 import {
   POSTIT_COLORS,
   COLOR_LIST,
@@ -10,7 +10,9 @@ import {
 
 export default function PinnedNote({
   note,
+  isVisibleOnScreen = true,
   onUpdate,
+  onToggleScreenPin,
   onDelete,
   onBringToFront,
   onDragStateChange,
@@ -26,12 +28,16 @@ export default function PinnedNote({
   });
   const [isBeingDeleted, setIsBeingDeleted] = useState(false);
   const [isOverTrashLocal, setIsOverTrashLocal] = useState(false);
+  const [pinPulse, setPinPulse] = useState(false);
 
   const dragMetaRef = useRef(null);
   const resizeMetaRef = useRef(null);
   const cardRef = useRef(null);
 
   const theme = POSTIT_COLORS[note.color] || POSTIT_COLORS.yellow;
+  const isPinnedToScreen = Boolean(note.pinnedTarget);
+  const pinnedLabel = note.pinnedTarget?.label || "Masaüstü";
+  const isDesktopTarget = note.pinnedTarget?.targetType === "desktop";
 
   useEffect(() => {
     if (!isDragging) {
@@ -48,7 +54,15 @@ export default function PinnedNote({
     }
   }, [note.width, note.height, isResizing]);
 
+  // If the note hides while hovered, notify parent so click-through can re-engage
+  useEffect(() => {
+    if (!isVisibleOnScreen) {
+      onInteractiveLeave?.();
+    }
+  }, [isVisibleOnScreen, onInteractiveLeave]);
+
   const handlePointerDown = (e) => {
+    if (!isVisibleOnScreen) return;
     onBringToFront?.(note.id);
 
     if (
@@ -80,7 +94,6 @@ export default function PinnedNote({
     });
   };
 
-  // Start resizing from the bottom-right corner grip
   const handleResizePointerDown = (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -94,6 +107,14 @@ export default function PinnedNote({
     };
 
     setIsResizing(true);
+  };
+
+  const handleCenterPinClick = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setPinPulse(true);
+    setTimeout(() => setPinPulse(false), 320);
+    await onToggleScreenPin?.(note);
   };
 
   // Drag position effect
@@ -185,7 +206,7 @@ export default function PinnedNote({
     };
   }, [isDragging, note.id, liveSize.width, liveSize.height, onUpdate, onDelete, onDragStateChange]);
 
-  // Resize effect (clamped between 210px default/min and 340px max)
+  // Resize effect
   useEffect(() => {
     if (!isResizing) return;
 
@@ -222,12 +243,14 @@ export default function PinnedNote({
     };
   }, [isResizing, note.id, onUpdate]);
 
+  const actuallyVisible = isVisibleOnScreen || isDragging || isResizing;
+
   return (
     <motion.div
       ref={cardRef}
-      data-interactive="true"
-      onMouseEnter={onInteractiveEnter}
-      onMouseLeave={onInteractiveLeave}
+      data-interactive={actuallyVisible ? "true" : "false"}
+      onMouseEnter={actuallyVisible ? onInteractiveEnter : undefined}
+      onMouseLeave={actuallyVisible ? onInteractiveLeave : undefined}
       onPointerDown={handlePointerDown}
       initial={{ scale: 0.88, opacity: 0 }}
       animate={
@@ -239,11 +262,24 @@ export default function PinnedNote({
               rotate: 42,
               opacity: 0,
             }
+          : !actuallyVisible
+          ? {
+              x: livePos.x,
+              y: livePos.y + 28,
+              scale: 0.78,
+              rotate: note.rotation || 0,
+              opacity: 0,
+            }
           : {
               x: livePos.x,
               y: livePos.y,
               scale: isDragging ? (isOverTrashLocal ? 0.86 : 1.05) : 1,
-              rotate: isDragging || isResizing ? (isOverTrashLocal ? 12 : 0) : note.rotation || 0,
+              rotate:
+                isDragging || isResizing
+                  ? isOverTrashLocal
+                    ? 12
+                    : 0
+                  : note.rotation || 0,
               opacity: isOverTrashLocal ? 0.85 : 1,
             }
       }
@@ -267,6 +303,7 @@ export default function PinnedNote({
         top: 0,
         width: liveSize.width,
         height: liveSize.height,
+        pointerEvents: actuallyVisible ? "auto" : "none",
       }}
       className={`fixed rounded-3xl ${theme.bodyBg} ${theme.border} border-2 paper-texture flex flex-col justify-between select-none transition-colors duration-200 ${
         isDragging
@@ -274,15 +311,73 @@ export default function PinnedNote({
           : "shadow-[0_14px_28px_-6px_rgba(0,0,0,0.26)] cursor-grab hover:shadow-[0_18px_36px_-8px_rgba(0,0,0,0.32)]"
       }`}
     >
-      {/* Top Adhesive Strip (Right-side color picker removed for clean look) */}
+      {/* Top-Center Tactile Push-Pin (Raptiye) Button */}
+      <div
+        data-no-drag="true"
+        className="absolute -top-3 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center"
+      >
+        <motion.button
+          type="button"
+          onClick={handleCenterPinClick}
+          animate={
+            pinPulse
+              ? { scale: [1, 0.82, 1.18, 1], y: [0, 3, -1, 0] }
+              : {
+                  scale: isPinnedToScreen ? 1 : 0.96,
+                  y: isPinnedToScreen ? 2 : 0,
+                }
+          }
+          transition={{ duration: 0.25 }}
+          title={
+            isPinnedToScreen
+              ? `${pinnedLabel} ekranına sabitlendi (Kaldırmak için tıkla)`
+              : "Bulunduğu ekrana/pencereye sabitle (Sadece o ekranda görünür)"
+          }
+          className={`group relative flex items-center gap-1 px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
+            isPinnedToScreen
+              ? "bg-neutral-900 text-white border-neutral-700 shadow-[0_6px_14px_rgba(0,0,0,0.38)]"
+              : `${theme.stripBg} ${theme.text} ${theme.border} shadow-md hover:bg-neutral-900 hover:text-white hover:border-neutral-700`
+          }`}
+        >
+          {/* Pin Head Visual */}
+          <span
+            className={`w-2 h-2 rounded-full transition-colors ${
+              isPinnedToScreen
+                ? "bg-emerald-400 shadow-[0_0_6px_#34d399]"
+                : "bg-neutral-800/40 group-hover:bg-amber-300"
+            }`}
+          />
+          <Pin
+            className={`w-3 h-3 transition-transform duration-200 ${
+              isPinnedToScreen
+                ? "rotate-0 fill-current text-amber-300"
+                : "rotate-45 opacity-80 group-hover:rotate-12"
+            }`}
+          />
+          {isPinnedToScreen && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-tight max-w-[92px] truncate">
+              {isDesktopTarget ? (
+                <Monitor className="w-2.5 h-2.5 text-emerald-300 shrink-0" />
+              ) : (
+                <AppWindow className="w-2.5 h-2.5 text-sky-300 shrink-0" />
+              )}
+              <span className="truncate">{pinnedLabel}</span>
+            </span>
+          )}
+        </motion.button>
+
+        {/* Subtle pin needle hole shadow on paper when pinned */}
+        {isPinnedToScreen && (
+          <div className="w-2 h-1 rounded-full bg-black/25 blur-[0.5px] -mt-0.5 pointer-events-none" />
+        )}
+      </div>
+
+      {/* Top Adhesive Strip */}
       <div
         className={`h-9 w-full rounded-t-[22px] ${theme.stripBg} border-b ${theme.border} px-3 flex items-center justify-between transition-colors duration-200`}
       >
-        <div className="flex items-center gap-1.5">
-          <GripHorizontal className={`w-4 h-4 ${theme.subText} opacity-75`} />
-          <span className={`text-[11px] font-semibold ${theme.subText} opacity-85`}>
-            Post-it
-          </span>
+        <div className="flex items-center gap-1">
+          <GripHorizontal className={`w-3.5 h-3.5 ${theme.subText} opacity-75`} />
         </div>
 
         {isResizing && (
@@ -303,7 +398,7 @@ export default function PinnedNote({
         />
       </div>
 
-      {/* Bottom Bar: Left Color Dots & Right Resize Handle (No color label text) */}
+      {/* Bottom Bar: Left Color Dots & Right Resize Handle */}
       <div
         data-no-drag="true"
         className="px-3 pb-2.5 pt-1 flex items-center justify-between"
@@ -327,7 +422,7 @@ export default function PinnedNote({
           })}
         </div>
 
-        {/* Subtle Diagonal Corner Resize Handle (210px min/default -> 340px max) */}
+        {/* Diagonal Corner Resize Handle */}
         <div
           data-no-drag="true"
           onPointerDown={handleResizePointerDown}
@@ -340,7 +435,12 @@ export default function PinnedNote({
             viewBox="0 0 10 10"
             className={`${theme.subText} fill-current`}
           >
-            <path d="M9 1L1 9M9 5L5 9M9 8.5L8.5 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            <path
+              d="M9 1L1 9M9 5L5 9M9 8.5L8.5 9"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
           </svg>
         </div>
       </div>

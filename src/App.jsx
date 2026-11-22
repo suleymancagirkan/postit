@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import StickyStack from "./components/StickyStack";
 import PinnedNote from "./components/PinnedNote";
 import TrashDock, { isPointInTrashZone } from "./components/TrashDock";
-import { useNotesStore } from "./hooks/useNotesStore";
+import { useNotesStore, clampNoteSize } from "./hooks/useNotesStore";
 import "./App.css";
 
 function isTauriRuntime() {
@@ -19,6 +19,7 @@ export default function App() {
     advanceStackSheet,
     pinNoteFromStack,
     updateNote,
+    toggleNoteScreenPin,
     bringToFront,
     deleteNote,
   } = useNotesStore();
@@ -30,10 +31,12 @@ export default function App() {
     noteId: null,
   });
 
+  // Map of note.id -> boolean indicating whether a screen-pinned note is currently visible
+  const [visibilityMap, setVisibilityMap] = useState({});
+
   const isDraggingRef = useRef(false);
   const hoverCountRef = useRef(0);
 
-  // Tauri setIgnoreCursorEvents helper (calls both WebviewWindow.setIgnoreCursorEvents and Rust state sync)
   const applyIgnoreCursorEvents = useCallback(async (ignore) => {
     if (!isTauriRuntime()) return;
     try {
@@ -41,7 +44,6 @@ export default function App() {
       await appWindow.setIgnoreCursorEvents(ignore);
       await invoke("set_click_through", { ignore });
     } catch {
-      // Fallback if only one API is reachable
       try {
         await invoke("set_click_through", { ignore });
       } catch {
@@ -51,8 +53,6 @@ export default function App() {
   }, []);
 
   // Collect all interactive bounding boxes ([data-interactive="true"]) and sync to Rust
-  // so that even when setIgnoreCursorEvents(true) is active on empty desktop areas,
-  // moving the mouse back over the stack, any pinned card, or the trash dock immediately wakes hit-testing.
   const syncInteractiveRegions = useCallback(() => {
     if (!isTauriRuntime()) return;
     const elements = document.querySelectorAll('[data-interactive="true"]');
@@ -72,17 +72,70 @@ export default function App() {
     }).catch(() => {});
   }, []);
 
+  // Poll OS window visibility for screen-pinned notes (Desktop vs specific App window like Browser)
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+
+    let cancelled = false;
+
+    const checkPinnedVisibility = async () => {
+      const pinnedNotes = notes.filter((n) => Boolean(n.pinnedTarget));
+      if (pinnedNotes.length === 0) {
+        if (!cancelled) setVisibilityMap({});
+        return;
+      }
+
+      const queries = pinnedNotes.map((n) => {
+        const w = clampNoteSize(n.width);
+        const h = clampNoteSize(n.height);
+        return {
+          id: n.id,
+          centerX: n.x + w / 2,
+          centerY: n.y + h / 2,
+          targetType: n.pinnedTarget.targetType || "desktop",
+          hwnd: Number(n.pinnedTarget.hwnd) || 0,
+          processName: n.pinnedTarget.processName || "",
+        };
+      });
+
+      try {
+        const results = await invoke("check_notes_visibility", { queries });
+        if (cancelled || !Array.isArray(results)) return;
+
+        setVisibilityMap((prev) => {
+          let changed = false;
+          const next = { ...prev };
+          for (const item of results) {
+            if (next[item.id] !== item.visible) {
+              next[item.id] = item.visible;
+              changed = true;
+            }
+          }
+          return changed ? next : prev;
+        });
+      } catch {
+        // ignore errors
+      }
+    };
+
+    checkPinnedVisibility();
+    const interval = setInterval(checkPinnedVisibility, 180);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [notes]);
+
   useEffect(() => {
     syncInteractiveRegions();
-    const timer = setInterval(syncInteractiveRegions, 250);
+    const timer = setInterval(syncInteractiveRegions, 220);
     window.addEventListener("resize", syncInteractiveRegions);
     return () => {
       clearInterval(timer);
       window.removeEventListener("resize", syncInteractiveRegions);
     };
-  }, [notes, dragState.isDragging, syncInteractiveRegions]);
+  }, [notes, visibilityMap, dragState.isDragging, syncInteractiveRegions]);
 
-  // Pointer move listener across the window to toggle setIgnoreCursorEvents dynamically
   useEffect(() => {
     const handleGlobalMouseMove = (e) => {
       if (isDraggingRef.current) {
@@ -115,7 +168,6 @@ export default function App() {
     }
   }, [applyIgnoreCursorEvents]);
 
-  // Unified drag state handler for both StickyStack tear-off and PinnedNote drag
   const handleDragStateChange = useCallback(
     ({ isDragging, source, noteId = null, clientX, clientY, isDrop = false }) => {
       const overTrash = isPointInTrashZone(clientX, clientY);
@@ -132,7 +184,6 @@ export default function App() {
         return { isOverTrash: overTrash, droppedInTrash: false };
       }
 
-      // Drag ended
       setDragState({
         isDragging: false,
         isOverTrash: false,
@@ -164,20 +215,28 @@ export default function App() {
       />
 
       {/* 2. Pinned Independent Sticker Cards */}
-      {notes.map((note) => (
-        <PinnedNote
-          key={note.id}
-          note={note}
-          onUpdate={updateNote}
-          onDelete={deleteNote}
-          onBringToFront={bringToFront}
-          onDragStateChange={handleDragStateChange}
-          onInteractiveEnter={handleInteractiveEnter}
-          onInteractiveLeave={handleInteractiveLeave}
-        />
-      ))}
+      {notes.map((note) => {
+        const isVisibleOnScreen = note.pinnedTarget
+          ? visibilityMap[note.id] !== false
+          : true;
 
-      {/* 3. 45-Degree Diagonal Trash Dock (appears on drag start) */}
+        return (
+          <PinnedNote
+            key={note.id}
+            note={note}
+            isVisibleOnScreen={isVisibleOnScreen}
+            onUpdate={updateNote}
+            onToggleScreenPin={toggleNoteScreenPin}
+            onDelete={deleteNote}
+            onBringToFront={bringToFront}
+            onDragStateChange={handleDragStateChange}
+            onInteractiveEnter={handleInteractiveEnter}
+            onInteractiveLeave={handleInteractiveLeave}
+          />
+        );
+      })}
+
+      {/* 3. 45-Degree Diagonal Trash Dock */}
       <TrashDock
         isVisible={dragState.isDragging}
         isOverTrash={dragState.isOverTrash}

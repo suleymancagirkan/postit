@@ -179,6 +179,7 @@ export function useNotesStore() {
               ...n,
               width: clampNoteSize(n.width),
               height: clampNoteSize(n.height),
+              pinnedTarget: n.pinnedTarget || null,
             }))
           : [];
         const maxZ = validNotes.reduce(
@@ -257,6 +258,7 @@ export function useNotesStore() {
         y: clampedY,
         width: size,
         height: size,
+        pinnedTarget: null,
         rotation: pickNaturalAngle(notes.length + Math.floor(Math.random() * 6)),
         zIndex: highestZRef.current,
         createdAt: now,
@@ -292,6 +294,57 @@ export function useNotesStore() {
     );
   }, []);
 
+  // Toggle pinning a note to the screen/window directly underneath its center coordinate
+  const toggleNoteScreenPin = useCallback(async (note) => {
+    if (note.pinnedTarget) {
+      // Unpin -> becomes globally visible again
+      setNotes((prev) =>
+        prev.map((n) =>
+          n.id === note.id
+            ? { ...n, pinnedTarget: null, updatedAt: Date.now() }
+            : n
+        )
+      );
+      return null;
+    }
+
+    const width = clampNoteSize(note.width);
+    const height = clampNoteSize(note.height);
+    const centerX = note.x + width / 2;
+    const centerY = note.y + height / 2;
+
+    let detected = {
+      targetType: "desktop",
+      hwnd: 0,
+      processName: "desktop",
+      label: "Masaüstü",
+      title: "Masaüstü",
+    };
+
+    if (isTauriRuntime()) {
+      try {
+        const res = await invoke("detect_target_at_point", {
+          x: centerX,
+          y: centerY,
+        });
+        if (res && res.targetType) {
+          detected = res;
+        }
+      } catch (err) {
+        console.warn("detect_target_at_point fallback:", err);
+      }
+    }
+
+    setNotes((prev) =>
+      prev.map((n) =>
+        n.id === note.id
+          ? { ...n, pinnedTarget: detected, updatedAt: Date.now() }
+          : n
+      )
+    );
+    return detected;
+  }, []);
+
   const bringToFront = useCallback((id) => {
     highestZRef.current += 1;
     const nextZ = highestZRef.current;
@@ -312,6 +365,7 @@ export function useNotesStore() {
     advanceStackSheet,
     pinNoteFromStack,
     updateNote,
+    toggleNoteScreenPin,
     bringToFront,
     deleteNote,
   };
