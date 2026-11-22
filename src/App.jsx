@@ -108,15 +108,13 @@ export default function App() {
     }).catch(() => {});
   }, []);
 
-  // Listen to System Tray actions
+  // Listen to System Tray actions (StrictMode-safe single handler)
   useEffect(() => {
-    if (!isTauriRuntime()) return;
-
-    let unlistenFn = null;
-    listen("tray-action", (event) => {
-      const action = event.payload;
+    const handleTrayAction = (action) => {
       if (action === "toggle_stack") {
         setIsStackMinimized((prev) => !prev);
+      } else if (action === "show_stack") {
+        setIsStackMinimized(false);
       } else if (action === "show_basket") {
         summonBasketTemporarily(BASKET_SUMMON_DURATION_MS);
       } else if (action === "stash_all_keep_pins") {
@@ -129,14 +127,39 @@ export default function App() {
         restoreAllNotesFromBasket(false);
         setIsBasketSummoned(false);
       }
+    };
+
+    // Direct global bridge called by Rust WebviewWindow::eval
+    window.__postitTrayAction = handleTrayAction;
+
+    if (!isTauriRuntime()) {
+      return () => {
+        delete window.__postitTrayAction;
+      };
+    }
+
+    let cancelled = false;
+    let unlistenFn = null;
+
+    listen("tray-action", (event) => {
+      if (cancelled) return;
+      handleTrayAction(event.payload);
     })
       .then((unlisten) => {
-        unlistenFn = unlisten;
+        if (cancelled) {
+          unlisten();
+        } else {
+          unlistenFn = unlisten;
+        }
       })
       .catch(() => {});
 
     return () => {
+      cancelled = true;
       if (unlistenFn) unlistenFn();
+      if (window.__postitTrayAction === handleTrayAction) {
+        delete window.__postitTrayAction;
+      }
     };
   }, [stashAllNotesToBasket, restoreAllNotesFromBasket, summonBasketTemporarily]);
 

@@ -838,34 +838,24 @@ pub fn run() {
                 .menu(&tray_menu)
                 .tooltip("Post-it")
                 .show_menu_on_left_click(false)
-                .on_menu_event(|app_handle, event| match event.id.as_ref() {
-                    "toggle_stack" => {
-                        if let Some(win) = app_handle.get_webview_window("main") {
-                            let _ = win.set_skip_taskbar(true);
-                            let _ = win.show();
-                        }
-                        let _ = app_handle.emit("tray-action", "toggle_stack");
-                    }
-                    "show_basket" => {
-                        if let Some(win) = app_handle.get_webview_window("main") {
-                            let _ = win.set_skip_taskbar(true);
-                            let _ = win.show();
-                        }
-                        let _ = app_handle.emit("tray-action", "show_basket");
-                    }
-                    "stash_all_keep_pins" => {
-                        let _ = app_handle.emit("tray-action", "stash_all_keep_pins");
-                    }
-                    "stash_all_clear_pins" => {
-                        let _ = app_handle.emit("tray-action", "stash_all_clear_pins");
-                    }
-                    "restore_all_basket" => {
-                        let _ = app_handle.emit("tray-action", "restore_all_basket");
-                    }
-                    "quit" => {
+                .on_menu_event(|app_handle, event| {
+                    let action = event.id.as_ref();
+                    if action == "quit" {
                         app_handle.exit(0);
+                        return;
                     }
-                    _ => {}
+                    if let Some(win) = app_handle.get_webview_window("main") {
+                        let _ = win.set_skip_taskbar(true);
+                        let _ = win.show();
+                        let _ = win.unminimize();
+                        let js = format!(
+                            "if (window.__postitTrayAction) {{ window.__postitTrayAction('{}'); }}",
+                            action
+                        );
+                        let _ = win.eval(&js);
+                    } else {
+                        let _ = app_handle.emit("tray-action", action);
+                    }
                 })
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
@@ -878,8 +868,13 @@ pub fn run() {
                         if let Some(win) = app_handle.get_webview_window("main") {
                             let _ = win.set_skip_taskbar(true);
                             let _ = win.show();
+                            let _ = win.unminimize();
+                            let _ = win.eval(
+                                "if (window.__postitTrayAction) { window.__postitTrayAction('toggle_stack'); }",
+                            );
+                        } else {
+                            let _ = app_handle.emit("tray-action", "toggle_stack");
                         }
-                        let _ = app_handle.emit("tray-action", "toggle_stack");
                     }
                 });
 
