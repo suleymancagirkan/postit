@@ -1,6 +1,48 @@
 import React, { useState, useEffect, useRef, useId } from "react";
 import { motion } from "framer-motion";
+import { invoke } from "@tauri-apps/api/core";
 import { POSTIT_COLORS } from "../hooks/useNotesStore";
+
+function isTauriRuntime() {
+  return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
+}
+
+/**
+ * Returns vibrant digital StandBy digit gradient stops based on PC battery percentage:
+ * - High (65%..100%): Fresh Emerald / Mint Green tones
+ * - Medium (30%..64%): Warm Yellow / Amber tones
+ * - Low (0%..29%): Vivid Crimson / Coral Red tones
+ */
+function getBatteryDigitPalette(level = 100) {
+  if (level >= 65) {
+    return {
+      hourStart: "#6EE7B7",
+      hourEnd: "#10B981",
+      min1Start: "#34D399",
+      min1End: "#059669",
+      min2Start: "#A7F3D0",
+      min2End: "#10B981",
+    };
+  }
+  if (level >= 30) {
+    return {
+      hourStart: "#FEF08A",
+      hourEnd: "#EAB308",
+      min1Start: "#FDE047",
+      min1End: "#CA8A04",
+      min2Start: "#FDBA74",
+      min2End: "#F59E0B",
+    };
+  }
+  return {
+    hourStart: "#FDA4AF",
+    hourEnd: "#E11D48",
+    min1Start: "#FB7185",
+    min1End: "#BE123C",
+    min2Start: "#FCA5A5",
+    min2End: "#DC2626",
+  };
+}
 
 const STORAGE_KEY_CLOCK_POS = "postit_desktop_clock_pos_v1";
 const STORAGE_KEY_CLOCK_FACE = "postit_desktop_clock_face_v1";
@@ -176,9 +218,46 @@ export default function DeskClockWidget({
     }
   });
   const [isDragging, setIsDragging] = useState(false);
+  const [batteryLevel, setBatteryLevel] = useState(100);
 
   const dragStartRef = useRef(null);
   const didMoveRef = useRef(false);
+
+  // Poll system battery level every 30s (native Win32 GetSystemPowerStatus, fallback to navigator.getBattery)
+  useEffect(() => {
+    let cancelled = false;
+
+    const refreshBattery = async () => {
+      if (isTauriRuntime()) {
+        try {
+          const status = await invoke("get_battery_status");
+          if (!cancelled && status && typeof status.level === "number") {
+            setBatteryLevel(status.level);
+            return;
+          }
+        } catch {
+          // fallback below
+        }
+      }
+      if (typeof navigator !== "undefined" && navigator.getBattery) {
+        try {
+          const bat = await navigator.getBattery();
+          if (!cancelled && typeof bat.level === "number") {
+            setBatteryLevel(Math.round(bat.level * 100));
+          }
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    refreshBattery();
+    const interval = setInterval(refreshBattery, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
 
   // 1-second tick for clock hands and countdown rings (low CPU usage)
   useEffect(() => {
@@ -280,6 +359,7 @@ export default function DeskClockWidget({
     : null;
   const ringHex = timerTheme ? timerTheme.hex : "#FACC15";
   const ringHexSoft = timerTheme ? timerTheme.hexSoft : "#FEF08A";
+  const batteryPalette = getBatteryDigitPalette(batteryLevel);
 
   // Clock time values
   const hours24 = now.getHours();
@@ -406,7 +486,9 @@ export default function DeskClockWidget({
             <stop offset="100%" stopColor="#09090B" />
           </linearGradient>
 
-          {/* Bubble Digital Mode Gradients (Matches Image 2 or active Post-it timer colors!) */}
+          {/* Bubble Digital Mode Gradients:
+              - When NO timer is active: follows PC battery level (Green -> Yellow -> Red)
+              - When a note @timer is active: follows the active Post-it note's color! */}
           <linearGradient
             id={`bubbleHourGrad_${uid}`}
             x1="0%"
@@ -416,11 +498,11 @@ export default function DeskClockWidget({
           >
             <stop
               offset="0%"
-              stopColor={primaryTimerEntry ? ringHexSoft : "#F472B6"}
+              stopColor={primaryTimerEntry ? ringHexSoft : batteryPalette.hourStart}
             />
             <stop
               offset="100%"
-              stopColor={primaryTimerEntry ? ringHex : "#DB2777"}
+              stopColor={primaryTimerEntry ? ringHex : batteryPalette.hourEnd}
             />
           </linearGradient>
 
@@ -438,7 +520,7 @@ export default function DeskClockWidget({
                   ? (POSTIT_COLORS[activeTimerEntries[1].note.color] || POSTIT_COLORS.yellow).hex
                   : primaryTimerEntry
                   ? ringHex
-                  : "#A78BFA"
+                  : batteryPalette.min1Start
               }
             />
             <stop
@@ -448,7 +530,7 @@ export default function DeskClockWidget({
                   ? (POSTIT_COLORS[activeTimerEntries[1].note.color] || POSTIT_COLORS.yellow).hexSoft
                   : primaryTimerEntry
                   ? ringHexSoft
-                  : "#7C3AED"
+                  : batteryPalette.min1End
               }
             />
           </linearGradient>
@@ -467,7 +549,7 @@ export default function DeskClockWidget({
                   ? (POSTIT_COLORS[activeTimerEntries[1].note.color] || POSTIT_COLORS.yellow).hexSoft
                   : primaryTimerEntry
                   ? ringHexSoft
-                  : "#C084FC"
+                  : batteryPalette.min2Start
               }
             />
             <stop
@@ -477,7 +559,7 @@ export default function DeskClockWidget({
                   ? (POSTIT_COLORS[activeTimerEntries[1].note.color] || POSTIT_COLORS.yellow).hex
                   : primaryTimerEntry
                   ? ringHex
-                  : "#9333EA"
+                  : batteryPalette.min2End
               }
             />
           </linearGradient>

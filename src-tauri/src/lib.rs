@@ -48,6 +48,14 @@ pub struct NoteVisibilityResult {
     pub resolved_hwnd: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatteryStatus {
+    pub level: u8,
+    pub charging: bool,
+    pub has_battery: bool,
+}
+
 pub struct HitTestState {
     pub regions: Arc<Mutex<Vec<HitRect>>>,
     pub is_dragging: Arc<Mutex<bool>>,
@@ -114,6 +122,17 @@ mod win32_tracker {
         ) -> i32;
     }
 
+    #[repr(C)]
+    #[derive(Default, Clone, Copy)]
+    struct SYSTEM_POWER_STATUS {
+        ac_line_status: u8,
+        battery_flag: u8,
+        battery_life_percent: u8,
+        system_status_flag: u8,
+        battery_life_time: u32,
+        battery_full_life_time: u32,
+    }
+
     #[link(name = "kernel32")]
     unsafe extern "system" {
         fn OpenProcess(dwDesiredAccess: DWORD, bInheritHandle: BOOL, dwProcessId: DWORD) -> HANDLE;
@@ -124,6 +143,24 @@ mod win32_tracker {
             lpdwSize: *mut DWORD,
         ) -> BOOL;
         fn CloseHandle(hObject: HANDLE) -> BOOL;
+        fn GetSystemPowerStatus(lpSystemPowerStatus: *mut SYSTEM_POWER_STATUS) -> BOOL;
+    }
+
+    pub fn query_battery_status() -> super::BatteryStatus {
+        let mut status = SYSTEM_POWER_STATUS::default();
+        let ok = unsafe { GetSystemPowerStatus(&mut status) };
+        if ok == 0 || status.battery_life_percent > 100 || (status.battery_flag & 128) != 0 {
+            return super::BatteryStatus {
+                level: 100,
+                charging: true,
+                has_battery: false,
+            };
+        }
+        super::BatteryStatus {
+            level: status.battery_life_percent,
+            charging: status.ac_line_status == 1,
+            has_battery: true,
+        }
     }
 
     #[derive(Debug, Clone)]
@@ -738,6 +775,22 @@ fn set_click_through(
 }
 
 #[tauri::command]
+fn get_battery_status() -> BatteryStatus {
+    #[cfg(target_os = "windows")]
+    {
+        win32_tracker::query_battery_status()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        BatteryStatus {
+            level: 100,
+            charging: true,
+            has_battery: false,
+        }
+    }
+}
+
+#[tauri::command]
 fn minimize_to_tray(window: WebviewWindow) -> Result<(), String> {
     let _ = window.set_skip_taskbar(true);
     window
@@ -1050,6 +1103,7 @@ pub fn run() {
             load_notes,
             save_notes,
             set_click_through,
+            get_battery_status,
             minimize_to_tray,
             update_hit_regions,
             detect_target_at_point,
