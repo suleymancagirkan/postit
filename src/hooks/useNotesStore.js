@@ -180,6 +180,7 @@ export function useNotesStore() {
               width: clampNoteSize(n.width),
               height: clampNoteSize(n.height),
               pinnedTarget: n.pinnedTarget || null,
+              inBasket: Boolean(n.inBasket),
             }))
           : [];
         const maxZ = validNotes.reduce(
@@ -241,7 +242,7 @@ export function useNotesStore() {
   }, []);
 
   const pinNoteFromStack = useCallback(
-    ({ x, y, text, color }) => {
+    ({ x, y, text, color, inBasket = false }) => {
       highestZRef.current += 1;
       const now = Date.now();
       const size = NOTE_SIZE_LIMITS.DEFAULT;
@@ -259,6 +260,7 @@ export function useNotesStore() {
         width: size,
         height: size,
         pinnedTarget: null,
+        inBasket: Boolean(inBasket),
         rotation: pickNaturalAngle(notes.length + Math.floor(Math.random() * 6)),
         zIndex: highestZRef.current,
         createdAt: now,
@@ -357,6 +359,75 @@ export function useNotesStore() {
     setNotes((prev) => prev.filter((note) => note.id !== id));
   }, []);
 
+  // Move a single note into the storage basket (optionally clearing its screen pin)
+  const stashNoteToBasket = useCallback((id, clearPin = false) => {
+    setNotes((prev) =>
+      prev.map((note) =>
+        note.id === id
+          ? {
+              ...note,
+              inBasket: true,
+              pinnedTarget: clearPin ? null : note.pinnedTarget,
+              updatedAt: Date.now(),
+            }
+          : note
+      )
+    );
+  }, []);
+
+  // Restore a single note from the basket back onto the screen
+  const restoreNoteFromBasket = useCallback((id, clearPin = false) => {
+    highestZRef.current += 1;
+    const nextZ = highestZRef.current;
+    setNotes((prev) =>
+      prev.map((note) =>
+        note.id === id
+          ? {
+              ...note,
+              inBasket: false,
+              pinnedTarget: clearPin ? null : note.pinnedTarget,
+              zIndex: nextZ,
+              updatedAt: Date.now(),
+            }
+          : note
+      )
+    );
+  }, []);
+
+  // Move all currently active notes into the basket
+  const stashAllNotesToBasket = useCallback((clearPins = false) => {
+    const now = Date.now();
+    setNotes((prev) =>
+      prev.map((note) =>
+        note.inBasket
+          ? note
+          : {
+              ...note,
+              inBasket: true,
+              pinnedTarget: clearPins ? null : note.pinnedTarget,
+              updatedAt: now,
+            }
+      )
+    );
+  }, []);
+
+  // Restore all stashed notes from the basket back onto the screen
+  const restoreAllNotesFromBasket = useCallback((clearPins = false) => {
+    const now = Date.now();
+    setNotes((prev) =>
+      prev.map((note) =>
+        !note.inBasket
+          ? note
+          : {
+              ...note,
+              inBasket: false,
+              pinnedTarget: clearPins ? null : note.pinnedTarget,
+              updatedAt: now,
+            }
+      )
+    );
+  }, []);
+
   return {
     notes,
     isLoaded,
@@ -368,5 +439,9 @@ export function useNotesStore() {
     toggleNoteScreenPin,
     bringToFront,
     deleteNote,
+    stashNoteToBasket,
+    restoreNoteFromBasket,
+    stashAllNotesToBasket,
+    restoreAllNotesFromBasket,
   };
 }

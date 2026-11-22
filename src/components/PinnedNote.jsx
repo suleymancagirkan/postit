@@ -220,6 +220,7 @@ export default function PinnedNote({
   isVisibleOnScreen = true,
   onUpdate,
   onToggleScreenPin,
+  onStashToBasket,
   onDelete,
   onBringToFront,
   onDragStateChange,
@@ -234,7 +235,9 @@ export default function PinnedNote({
     height: clampNoteSize(note.height),
   });
   const [isBeingDeleted, setIsBeingDeleted] = useState(false);
+  const [isBeingStashed, setIsBeingStashed] = useState(false);
   const [isOverTrashLocal, setIsOverTrashLocal] = useState(false);
+  const [isOverBasketLocal, setIsOverBasketLocal] = useState(false);
   const [pinPulse, setPinPulse] = useState(false);
 
   const dragMetaRef = useRef(null);
@@ -356,6 +359,7 @@ export default function PinnedNote({
         clientY: e.clientY,
       });
       setIsOverTrashLocal(Boolean(status?.isOverTrash));
+      setIsOverBasketLocal(Boolean(status?.isOverBasket));
     };
 
     const handlePointerUp = (e) => {
@@ -388,12 +392,20 @@ export default function PinnedNote({
       });
 
       setIsOverTrashLocal(false);
+      setIsOverBasketLocal(false);
 
       if (dropStatus?.droppedInTrash) {
         setIsBeingDeleted(true);
         setTimeout(() => {
           onDelete?.(note.id);
         }, 230);
+      } else if (dropStatus?.droppedInBasket) {
+        setIsBeingStashed(true);
+        setTimeout(() => {
+          setIsBeingStashed(false);
+          setIsDragging(false);
+          onStashToBasket?.(note.id);
+        }, 220);
       } else {
         setLivePos({ x: finalX, y: finalY });
         onUpdate?.(note.id, { x: finalX, y: finalY });
@@ -409,7 +421,16 @@ export default function PinnedNote({
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
-  }, [isDragging, note.id, liveSize.width, liveSize.height, onUpdate, onDelete, onDragStateChange]);
+  }, [
+    isDragging,
+    note.id,
+    liveSize.width,
+    liveSize.height,
+    onUpdate,
+    onDelete,
+    onStashToBasket,
+    onDragStateChange,
+  ]);
 
   // Resize effect
   useEffect(() => {
@@ -467,6 +488,14 @@ export default function PinnedNote({
               rotate: 42,
               opacity: 0,
             }
+          : isBeingStashed
+          ? {
+              x: window.innerWidth - 110,
+              y: window.innerHeight - 280,
+              scale: 0.14,
+              rotate: -18,
+              opacity: 0,
+            }
           : !actuallyVisible
           ? {
               x: livePos.x,
@@ -478,14 +507,20 @@ export default function PinnedNote({
           : {
               x: livePos.x,
               y: livePos.y,
-              scale: isDragging ? (isOverTrashLocal ? 0.86 : 1.05) : 1,
+              scale: isDragging
+                ? isOverTrashLocal || isOverBasketLocal
+                  ? 0.86
+                  : 1.05
+                : 1,
               rotate:
                 isDragging || isResizing
                   ? isOverTrashLocal
                     ? 12
+                    : isOverBasketLocal
+                    ? -8
                     : 0
                   : note.rotation || 0,
-              opacity: isOverTrashLocal ? 0.85 : 1,
+              opacity: isOverTrashLocal || isOverBasketLocal ? 0.88 : 1,
             }
       }
       transition={

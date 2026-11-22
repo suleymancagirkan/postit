@@ -5,9 +5,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, State, WebviewWindow,
+    AppHandle, Emitter, Manager, State, WebviewWindow,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -599,29 +599,74 @@ pub fn run() {
             is_ignoring,
         })
         .setup(move |app| {
-            // Build System Tray icon & menu so minimizing hides to the background tray area (not taskbar)
-            let toggle_item =
-                MenuItem::with_id(app, "toggle", "Post-it Göster / Gizle", true, None::<&str>)?;
+            // Build System Tray icon & menu:
+            // Minimizing only hides the Post-it Stack (active notes stay on screen),
+            // and right-click menu provides "Hepsini Sepete At (Pinleri Koru / Kaldır)" & "Sepettekileri Çıkar"
+            let toggle_stack_item = MenuItem::with_id(
+                app,
+                "toggle_stack",
+                "Post-it Yığınını Göster / Gizle",
+                true,
+                None::<&str>,
+            )?;
+            let sep1 = PredefinedMenuItem::separator(app)?;
+            let stash_keep_pins_item = MenuItem::with_id(
+                app,
+                "stash_all_keep_pins",
+                "Hepsini Sepete At (Pinleri Koru)",
+                true,
+                None::<&str>,
+            )?;
+            let stash_clear_pins_item = MenuItem::with_id(
+                app,
+                "stash_all_clear_pins",
+                "Hepsini Sepete At (Pinleri Kaldır)",
+                true,
+                None::<&str>,
+            )?;
+            let restore_basket_item = MenuItem::with_id(
+                app,
+                "restore_all_basket",
+                "Sepetteki Notları Ekrana Çıkar",
+                true,
+                None::<&str>,
+            )?;
+            let sep2 = PredefinedMenuItem::separator(app)?;
             let quit_item = MenuItem::with_id(app, "quit", "Çıkış", true, None::<&str>)?;
-            let tray_menu = Menu::with_items(app, &[&toggle_item, &quit_item])?;
+
+            let tray_menu = Menu::with_items(
+                app,
+                &[
+                    &toggle_stack_item,
+                    &sep1,
+                    &stash_keep_pins_item,
+                    &stash_clear_pins_item,
+                    &restore_basket_item,
+                    &sep2,
+                    &quit_item,
+                ],
+            )?;
 
             let mut tray_builder = TrayIconBuilder::new()
                 .menu(&tray_menu)
                 .tooltip("Post-it")
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app_handle, event| match event.id.as_ref() {
-                    "toggle" => {
+                    "toggle_stack" => {
                         if let Some(win) = app_handle.get_webview_window("main") {
-                            let is_vis = win.is_visible().unwrap_or(true);
                             let _ = win.set_skip_taskbar(true);
-                            if is_vis {
-                                let _ = win.hide();
-                            } else {
-                                let _ = win.show();
-                                let _ = win.unminimize();
-                                let _ = win.set_focus();
-                            }
+                            let _ = win.show();
                         }
+                        let _ = app_handle.emit("tray-action", "toggle_stack");
+                    }
+                    "stash_all_keep_pins" => {
+                        let _ = app_handle.emit("tray-action", "stash_all_keep_pins");
+                    }
+                    "stash_all_clear_pins" => {
+                        let _ = app_handle.emit("tray-action", "stash_all_clear_pins");
+                    }
+                    "restore_all_basket" => {
+                        let _ = app_handle.emit("tray-action", "restore_all_basket");
                     }
                     "quit" => {
                         app_handle.exit(0);
@@ -637,16 +682,10 @@ pub fn run() {
                     {
                         let app_handle = tray.app_handle();
                         if let Some(win) = app_handle.get_webview_window("main") {
-                            let is_vis = win.is_visible().unwrap_or(true);
                             let _ = win.set_skip_taskbar(true);
-                            if is_vis {
-                                let _ = win.hide();
-                            } else {
-                                let _ = win.show();
-                                let _ = win.unminimize();
-                                let _ = win.set_focus();
-                            }
+                            let _ = win.show();
                         }
+                        let _ = app_handle.emit("tray-action", "toggle_stack");
                     }
                 });
 

@@ -16,6 +16,7 @@ export default function StickyStack({
   onUpdateDraft,
   onTearOffPin,
   onDiscardDraft,
+  onMinimizeStack,
   onDragStateChange,
   onInteractiveEnter,
   onInteractiveLeave,
@@ -139,6 +140,17 @@ export default function StickyStack({
           setIsSnappedFree(false);
           setRawOffset({ x: 0, y: 0 });
         }, 220);
+      } else if (dropResult?.droppedInBasket) {
+        onTearOffPin?.({
+          x: 340,
+          y: 120,
+          text: draft.text,
+          color: draft.color,
+          inBasket: true,
+        });
+        setIsTearing(false);
+        setIsSnappedFree(false);
+        setRawOffset({ x: 0, y: 0 });
       } else if (snappedFreeRef.current) {
         // Magnetic bond was broken -> pin at (finalX, finalY)
         onTearOffPin?.({
@@ -181,14 +193,11 @@ export default function StickyStack({
     });
   };
 
-  const handleMinimizeToTray = async (e) => {
+  const handleMinimizeToTray = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    try {
-      await invoke("minimize_to_tray");
-    } catch {
-      // ignore in browser preview
-    }
+    onInteractiveLeave?.();
+    onMinimizeStack?.();
   };
 
   return (

@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import StickyStack from "./components/StickyStack";
 import PinnedNote from "./components/PinnedNote";
 import TrashDock, { isPointInTrashZone } from "./components/TrashDock";
+import BasketDock, { isPointInBasketZone } from "./components/BasketDock";
 import { useNotesStore, clampNoteSize } from "./hooks/useNotesStore";
 import "./App.css";
 
@@ -22,20 +24,30 @@ export default function App() {
     toggleNoteScreenPin,
     bringToFront,
     deleteNote,
+    stashNoteToBasket,
+    restoreNoteFromBasket,
+    stashAllNotesToBasket,
+    restoreAllNotesFromBasket,
   } = useNotesStore();
+
+  // Minimizing only minimizes the StickyStack; active notes remain on screen
+  const [isStackMinimized, setIsStackMinimized] = useState(false);
 
   const [dragState, setDragState] = useState({
     isDragging: false,
     isOverTrash: false,
+    isOverBasket: false,
     source: null,
     noteId: null,
   });
 
-  // Map of note.id -> boolean indicating whether a screen-pinned note is currently visible
   const [visibilityMap, setVisibilityMap] = useState({});
 
   const isDraggingRef = useRef(false);
   const hoverCountRef = useRef(0);
+
+  const activeNotes = notes.filter((n) => !n.inBasket);
+  const basketNotes = notes.filter((n) => Boolean(n.inBasket));
 
   const applyIgnoreCursorEvents = useCallback(async (ignore) => {
     if (!isTauriRuntime()) return;
@@ -52,7 +64,6 @@ export default function App() {
     }
   }, []);
 
-  // Collect all interactive bounding boxes ([data-interactive="true"]) and sync to Rust
   const syncInteractiveRegions = useCallback(() => {
     if (!isTauriRuntime()) return;
     const elements = document.querySelectorAll('[data-interactive="true"]');
@@ -72,14 +83,41 @@ export default function App() {
     }).catch(() => {});
   }, []);
 
-  // Poll OS window visibility for screen-pinned notes (Desktop vs specific App window like Browser)
+  // Listen to System Tray actions ("toggle_stack", "stash_all_keep_pins", "stash_all_clear_pins", "restore_all_basket")
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+
+    let unlistenFn = null;
+    listen("tray-action", (event) => {
+      const action = event.payload;
+      if (action === "toggle_stack") {
+        setIsStackMinimized((prev) => !prev);
+      } else if (action === "stash_all_keep_pins") {
+        stashAllNotesToBasket(false);
+      } else if (action === "stash_all_clear_pins") {
+        stashAllNotesToBasket(true);
+      } else if (action === "restore_all_basket") {
+        restoreAllNotesFromBasket(false);
+      }
+    })
+      .then((unlisten) => {
+        unlistenFn = unlisten;
+      })
+      .catch(() => {});
+
+    return () => {
+      if (unlistenFn) unlistenFn();
+    };
+  }, [stashAllNotesToBasket, restoreAllNotesFromBasket]);
+
+  // Poll OS window visibility for active screen-pinned notes
   useEffect(() => {
     if (!isTauriRuntime()) return;
 
     let cancelled = false;
 
     const checkPinnedVisibility = async () => {
-      const pinnedNotes = notes.filter((n) => Boolean(n.pinnedTarget));
+      const pinnedNotes = notes.filter((n) => !n.inBasket && Boolean(n.pinnedTarget));
       if (pinnedNotes.length === 0) {
         if (!cancelled) setVisibilityMap({});
         return;
@@ -134,7 +172,7 @@ export default function App() {
       clearInterval(timer);
       window.removeEventListener("resize", syncInteractiveRegions);
     };
-  }, [notes, visibilityMap, dragState.isDragging, syncInteractiveRegions]);
+  }, [notes, visibilityMap, isStackMinimized, dragState.isDragging, syncInteractiveRegions]);
 
   useEffect(() => {
     const handleGlobalMouseMove = (e) => {
@@ -171,6 +209,7 @@ export default function App() {
   const handleDragStateChange = useCallback(
     ({ isDragging, source, noteId = null, clientX, clientY, isDrop = false }) => {
       const overTrash = isPointInTrashZone(clientX, clientY);
+      const overBasket = !overTrash && isPointInBasketZone(clientX, clientY);
       isDraggingRef.current = isDragging;
 
       if (isDragging) {
@@ -178,15 +217,22 @@ export default function App() {
         setDragState({
           isDragging: true,
           isOverTrash: overTrash,
+          isOverBasket: overBasket,
           source,
           noteId,
         });
-        return { isOverTrash: overTrash, droppedInTrash: false };
+        return {
+          isOverTrash: overTrash,
+          isOverBasket: overBasket,
+          droppedInTrash: false,
+          droppedInBasket: false,
+        };
       }
 
       setDragState({
         isDragging: false,
         isOverTrash: false,
+        isOverBasket: false,
         source: null,
         noteId: null,
       });
@@ -194,7 +240,9 @@ export default function App() {
 
       return {
         isOverTrash: overTrash,
+        isOverBasket: overBasket,
         droppedInTrash: Boolean(isDrop && overTrash),
+        droppedInBasket: Boolean(isDrop && overBasket),
       };
     },
     [applyIgnoreCursorEvents, syncInteractiveRegions]
@@ -202,20 +250,23 @@ export default function App() {
 
   return (
     <main className="relative w-screen h-screen bg-transparent overflow-hidden select-none">
-      {/* 1. Post-it Stack in the corner */}
-      <StickyStack
-        draft={stackDraft}
-        onUpdateDraft={updateStackDraft}
-        onTearOffPin={pinNoteFromStack}
-        onDiscardDraft={() => advanceStackSheet(stackDraft.color)}
-        onDragStateChange={handleDragStateChange}
-        onInteractiveEnter={handleInteractiveEnter}
-        onInteractiveLeave={handleInteractiveLeave}
-        pinnedCount={notes.length}
-      />
+      {/* 1. Post-it Stack in the corner (Minimizing hides only this stack, not the pinned notes) */}
+      {!isStackMinimized && (
+        <StickyStack
+          draft={stackDraft}
+          onUpdateDraft={updateStackDraft}
+          onTearOffPin={pinNoteFromStack}
+          onDiscardDraft={() => advanceStackSheet(stackDraft.color)}
+          onMinimizeStack={() => setIsStackMinimized(true)}
+          onDragStateChange={handleDragStateChange}
+          onInteractiveEnter={handleInteractiveEnter}
+          onInteractiveLeave={handleInteractiveLeave}
+          pinnedCount={activeNotes.length}
+        />
+      )}
 
-      {/* 2. Pinned Independent Sticker Cards */}
-      {notes.map((note) => {
+      {/* 2. Pinned Independent Sticker Cards (Stay on screen even when the stack is minimized) */}
+      {activeNotes.map((note) => {
         const isVisibleOnScreen = note.pinnedTarget
           ? visibilityMap[note.id] !== false
           : true;
@@ -227,6 +278,7 @@ export default function App() {
             isVisibleOnScreen={isVisibleOnScreen}
             onUpdate={updateNote}
             onToggleScreenPin={toggleNoteScreenPin}
+            onStashToBasket={stashNoteToBasket}
             onDelete={deleteNote}
             onBringToFront={bringToFront}
             onDragStateChange={handleDragStateChange}
@@ -236,7 +288,22 @@ export default function App() {
         );
       })}
 
-      {/* 3. 45-Degree Diagonal Trash Dock */}
+      {/* 3. Right-Edge Storage Basket Dock (slides in when dragging, or accessible via right tab) */}
+      <BasketDock
+        isDragging={dragState.isDragging}
+        isOverBasket={dragState.isOverBasket}
+        basketNotes={basketNotes}
+        activeNotesCount={activeNotes.length}
+        isStackMinimized={isStackMinimized}
+        onRestoreNote={restoreNoteFromBasket}
+        onRestoreAll={restoreAllNotesFromBasket}
+        onStashAll={stashAllNotesToBasket}
+        onToggleStackMinimized={() => setIsStackMinimized((prev) => !prev)}
+        onInteractiveEnter={handleInteractiveEnter}
+        onInteractiveLeave={handleInteractiveLeave}
+      />
+
+      {/* 4. Bottom-Right 45-Degree Diagonal Trash Dock */}
       <TrashDock
         isVisible={dragState.isDragging}
         isOverTrash={dragState.isOverTrash}
