@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, ArrowUpRight, GripHorizontal, Minus } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
+import { Sparkles, GripHorizontal, Minus } from "lucide-react";
 import { POSTIT_COLORS, COLOR_LIST, NOTE_SIZE_LIMITS } from "../hooks/useNotesStore";
 import MarkdownEditor from "./MarkdownEditor";
 import { CrumpledPaperCreases } from "./PinnedNote";
@@ -11,7 +10,8 @@ const CRUMPLED_CLIP_PATH =
 const NORMAL_CLIP_PATH =
   "polygon(0% 0%, 50% 0%, 100% 0%, 100% 25%, 100% 50%, 100% 75%, 100% 100%, 50% 100%, 25% 100%, 0% 100%, 0% 50%, 0% 25%)";
 
-const STACK_ORIGIN = { x: 36, y: 36 };
+const DEFAULT_STACK_ORIGIN = { x: 36, y: 36 };
+const STORAGE_KEY_STACK_POS = "postit_desktop_stack_pos_v1";
 // Magnetic pull break distance: inside this radius the sheet resists like a magnet;
 // beyond it, the magnetic bond snaps and the card leaps free to the cursor.
 const MAGNET_BREAK_DISTANCE = 115;
@@ -34,6 +34,24 @@ export default function StickyStack({
   const [isDiscarding, setIsDiscarding] = useState(false);
   const [isOverTrashLocal, setIsOverTrashLocal] = useState(false);
   const [isOverBasketLocal, setIsOverBasketLocal] = useState(false);
+
+  // Moving the entire stack by dragging the top-left 6-dot grip icon
+  const [stackPos, setStackPos] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_STACK_POS);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (typeof parsed.x === "number" && typeof parsed.y === "number") {
+          return parsed;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return DEFAULT_STACK_ORIGIN;
+  });
+  const [isMovingStack, setIsMovingStack] = useState(false);
+  const stackMoveStartRef = useRef(null);
 
   const dragStartRef = useRef(null);
   const snappedFreeRef = useRef(false);
@@ -197,17 +215,63 @@ export default function StickyStack({
     };
   }, [isTearing, draft.text, draft.color, onDragStateChange, onTearOffPin, onDiscardDraft]);
 
-  const handleQuickPin = () => {
-    const offsetIndex = pinnedCount % 6;
-    const targetX = Math.min(window.innerWidth - cardSize - 40, 290 + offsetIndex * 34);
-    const targetY = Math.min(window.innerHeight - cardSize - 40, 52 + offsetIndex * 26);
-    onTearOffPin?.({
-      x: targetX,
-      y: targetY,
-      text: draft.text,
-      color: draft.color,
-    });
+  // Dragging from the 6-dot grip icon moves the entire stack
+  const handleStackGripPointerDown = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    stackMoveStartRef.current = {
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      initialX: stackPos.x,
+      initialY: stackPos.y,
+    };
+    setIsMovingStack(true);
   };
+
+  useEffect(() => {
+    if (!isMovingStack) return;
+
+    const handlePointerMove = (e) => {
+      if (!stackMoveStartRef.current) return;
+      const dx = e.clientX - stackMoveStartRef.current.startClientX;
+      const dy = e.clientY - stackMoveStartRef.current.startClientY;
+
+      const nextX = Math.max(
+        12,
+        Math.min(
+          window.innerWidth - cardSize - 12,
+          Math.round(stackMoveStartRef.current.initialX + dx)
+        )
+      );
+      const nextY = Math.max(
+        12,
+        Math.min(
+          window.innerHeight - cardSize - 12,
+          Math.round(stackMoveStartRef.current.initialY + dy)
+        )
+      );
+
+      setStackPos({ x: nextX, y: nextY });
+    };
+
+    const handlePointerUp = () => {
+      setIsMovingStack(false);
+      stackMoveStartRef.current = null;
+      try {
+        localStorage.setItem(STORAGE_KEY_STACK_POS, JSON.stringify(stackPos));
+      } catch {
+        // ignore
+      }
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [isMovingStack, cardSize, stackPos]);
 
   const handleMinimizeToTray = (e) => {
     e.preventDefault();
@@ -223,8 +287,8 @@ export default function StickyStack({
       onMouseEnter={onInteractiveEnter}
       onMouseLeave={onInteractiveLeave}
       style={{
-        left: STACK_ORIGIN.x,
-        top: STACK_ORIGIN.y,
+        left: stackPos.x,
+        top: stackPos.y,
         width: cardSize,
         height: cardSize,
       }}
@@ -298,8 +362,8 @@ export default function StickyStack({
             animate={
               isDiscarding
                 ? {
-                    x: window.innerWidth - STACK_ORIGIN.x - 155,
-                    y: window.innerHeight - STACK_ORIGIN.y - 165,
+                    x: window.innerWidth - stackPos.x - 155,
+                    y: window.innerHeight - stackPos.y - 165,
                     scale: 0.16,
                     rotate: 160,
                     opacity: 0,
@@ -349,12 +413,22 @@ export default function StickyStack({
             } ${isTearing ? "cursor-grabbing z-50" : "cursor-grab"}`}
           >
             <CrumpledPaperCreases isCrumpled={isOverTrashLocal || isDiscarding} />
-            {/* Top Adhesive Strip */}
+            {/* Top Adhesive Strip: Left 6-dot icon moves the stack, middle empty area tears off top sheet, right minus minimizes stack */}
             <div
               className={`h-9 w-full rounded-t-[22px] ${activeTheme.stripBg} border-b ${activeTheme.border} px-3 flex items-center justify-between transition-colors duration-200`}
             >
               <div className="flex items-center gap-1.5">
-                <GripHorizontal className={`w-4 h-4 ${activeTheme.subText} opacity-75`} />
+                <button
+                  type="button"
+                  data-no-drag="true"
+                  onPointerDown={handleStackGripPointerDown}
+                  title="Yığının tamamını taşımak için basılı tutup sürükleyin"
+                  className={`p-1 -ml-1 rounded-lg hover:bg-black/10 active:scale-95 transition ${
+                    isMovingStack ? "cursor-grabbing bg-black/15" : "cursor-move"
+                  }`}
+                >
+                  <GripHorizontal className={`w-4 h-4 ${activeTheme.subText} opacity-80`} />
+                </button>
                 <span
                   className={`text-[11px] font-semibold tracking-tight ${activeTheme.subText}`}
                 >
@@ -369,17 +443,8 @@ export default function StickyStack({
               <div className="flex items-center gap-1" data-no-drag="true">
                 <button
                   type="button"
-                  onClick={handleQuickPin}
-                  title="Masaüstüne Yapıştır"
-                  className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10.5px] font-semibold ${activeTheme.accentBg} ${activeTheme.text} hover:brightness-95 active:scale-95 transition cursor-pointer shadow-2xs`}
-                >
-                  <span>Yapıştır</span>
-                  <ArrowUpRight className="w-3 h-3" />
-                </button>
-                <button
-                  type="button"
                   onClick={handleMinimizeToTray}
-                  title="Sistem Tepsisine Küçült (Arka Plana Gizle)"
+                  title="Yığını Gizle"
                   className={`inline-flex items-center justify-center w-5 h-5 rounded-full ${activeTheme.accentBg} ${activeTheme.text} hover:brightness-95 active:scale-95 transition cursor-pointer shadow-2xs`}
                 >
                   <Minus className="w-3 h-3" />
