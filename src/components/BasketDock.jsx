@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 export const BASKET_ZONE_RADIUS = 145;
+const EDGE_MAGNET_THRESHOLD = 68;
 
 export function getBasketTargetCenter() {
   if (typeof window === "undefined") return { x: 1200, y: 500 };
@@ -38,9 +39,66 @@ export default function BasketDock({
   isOverBasket,
   basketNotes = [],
   onRestoreNote,
+  onSummonBasket,
   onInteractiveEnter,
   onInteractiveLeave,
 }) {
+  const [isPullingBar, setIsPullingBar] = useState(false);
+  const [pullLeftPx, setPullLeftPx] = useState(0);
+  const pullStartXRef = useRef(null);
+  const hasSnappedOpenRef = useRef(false);
+
+  // Magnetic tension (0 -> 1) while pulling the right-edge handle to the left
+  const pullTension = isPullingBar
+    ? Math.min(1, pullLeftPx / EDGE_MAGNET_THRESHOLD)
+    : 0;
+  // Non-linear magnetic resistance: moves only ~32% until the threshold snaps open
+  const resistedPullX = isPullingBar
+    ? Math.round(pullLeftPx * (0.22 + 0.25 * Math.pow(pullTension, 1.8)))
+    : 0;
+
+  const handleBarPointerDown = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    pullStartXRef.current = e.clientX;
+    hasSnappedOpenRef.current = false;
+    setIsPullingBar(true);
+    setPullLeftPx(0);
+  };
+
+  useEffect(() => {
+    if (!isPullingBar) return;
+
+    const handlePointerMove = (e) => {
+      if (pullStartXRef.current === null) return;
+      // Pulling to the left produces a positive pull distance
+      const deltaLeft = Math.max(0, pullStartXRef.current - e.clientX);
+      setPullLeftPx(deltaLeft);
+
+      if (!hasSnappedOpenRef.current && deltaLeft >= EDGE_MAGNET_THRESHOLD) {
+        hasSnappedOpenRef.current = true;
+        setIsPullingBar(false);
+        setPullLeftPx(0);
+        pullStartXRef.current = null;
+        onSummonBasket?.();
+      }
+    };
+
+    const handlePointerUp = () => {
+      setIsPullingBar(false);
+      setPullLeftPx(0);
+      pullStartXRef.current = null;
+      hasSnappedOpenRef.current = false;
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [isPullingBar, onSummonBasket]);
+
   const previewSheets =
     basketNotes.length > 0
       ? basketNotes.slice(-4)
@@ -65,27 +123,69 @@ export default function BasketDock({
   };
 
   return (
-    <AnimatePresence>
-      {isVisible && (
-        <motion.div
+    <>
+      {/* Permanent 10% Opacity Right-Edge Magnetic Pull Handle (Visible when basket is hidden) */}
+      {!isVisible && (
+        <div
           data-interactive="true"
           onMouseEnter={onInteractiveEnter}
           onMouseLeave={onInteractiveLeave}
-          onClick={handleBasketClick}
-          initial={{ x: 145, opacity: 0, scale: 0.65, rotate: 22 }}
-          animate={{
-            x: isOverBasket ? -12 : 0,
-            opacity: 1,
-            scale: isOverBasket ? 1.12 : 1,
-            rotate: isOverBasket ? -4 : 0,
-          }}
-          exit={{ x: 145, opacity: 0, scale: 0.65, rotate: 22 }}
-          transition={{
-            type: "spring",
-            stiffness: 360,
-            damping: 24,
-          }}
-          style={{ bottom: 185 }}
+          onPointerDown={handleBarPointerDown}
+          style={{ bottom: 205 }}
+          title="Sepeti çıkarmak için sola doğru çekin"
+          className="fixed right-0 z-[9995] flex items-center justify-end pl-3 py-3 cursor-ew-resize select-none group"
+        >
+          <motion.div
+            animate={{
+              x: -resistedPullX,
+              scaleY: isPullingBar ? 1 + pullTension * 0.22 : 1,
+              scaleX: isPullingBar ? 1 + pullTension * 0.35 : 1,
+            }}
+            transition={
+              isPullingBar
+                ? { type: "tween", duration: 0 }
+                : { type: "spring", stiffness: 520, damping: 24 }
+            }
+            className={`w-1.5 h-16 rounded-l-full bg-neutral-200 shadow-sm transition-opacity duration-200 ${
+              isPullingBar
+                ? "opacity-85 w-2 bg-amber-300 shadow-[0_0_12px_rgba(251,191,36,0.5)]"
+                : "opacity-10 group-hover:opacity-55 group-hover:w-2"
+            }`}
+          />
+        </div>
+      )}
+
+      <AnimatePresence>
+        {(isVisible || (isPullingBar && pullTension > 0.15)) && (
+          <motion.div
+            data-interactive="true"
+            onMouseEnter={onInteractiveEnter}
+            onMouseLeave={onInteractiveLeave}
+            onClick={handleBasketClick}
+            initial={{ x: 145, opacity: 0, scale: 0.65, rotate: 22 }}
+            animate={
+              isVisible
+                ? {
+                    x: isOverBasket ? -12 : 0,
+                    opacity: 1,
+                    scale: isOverBasket ? 1.12 : 1,
+                    rotate: isOverBasket ? -4 : 0,
+                  }
+                : {
+                    // Magnetic peek preview while pulling the right-edge bar
+                    x: 120 - pullTension * 55,
+                    opacity: pullTension * 0.85,
+                    scale: 0.75 + pullTension * 0.15,
+                    rotate: 16 - pullTension * 10,
+                  }
+            }
+            exit={{ x: 145, opacity: 0, scale: 0.65, rotate: 22 }}
+            transition={{
+              type: "spring",
+              stiffness: 360,
+              damping: 24,
+            }}
+            style={{ bottom: 185 }}
           title={
             basketNotes.length > 0
               ? "Notu ekrana geri çıkarmak için kağıda veya sepete tıklayın"
@@ -369,7 +469,8 @@ export default function BasketDock({
             </svg>
           </div>
         </motion.div>
-      )}
-    </AnimatePresence>
+        )}
+      </AnimatePresence>
+    </>
   );
 }

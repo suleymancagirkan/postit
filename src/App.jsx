@@ -340,12 +340,13 @@ export default function App() {
         );
       })}
 
-      {/* 3. 2.5D Storage Basket (Only visible while dragging a note OR for 25s when summoned via System Tray) */}
+      {/* 3. 2.5D Storage Basket (Visible while dragging, pulled from right-edge magnetic bar, or summoned via Tray for 25s) */}
       <BasketDock
         isVisible={dragState.isDragging || isBasketSummoned}
         isOverBasket={dragState.isOverBasket}
         basketNotes={basketNotes}
         onRestoreNote={handleRestoreNoteFromBasket}
+        onSummonBasket={() => summonBasketTemporarily(BASKET_SUMMON_DURATION_MS)}
         onInteractiveEnter={handleInteractiveEnter}
         onInteractiveLeave={handleInteractiveLeave}
       />
