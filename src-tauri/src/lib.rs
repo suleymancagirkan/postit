@@ -54,6 +54,10 @@ pub struct HitTestState {
     pub is_ignoring: Arc<Mutex<bool>>,
 }
 
+pub struct DbState {
+    pub conn: Mutex<Option<Connection>>,
+}
+
 #[cfg(target_os = "windows")]
 mod win32_tracker {
     use super::{NoteVisibilityQuery, NoteVisibilityResult, PinnedTargetInfo};
@@ -125,10 +129,9 @@ mod win32_tracker {
     #[derive(Debug, Clone)]
     struct WindowEntry {
         hwnd: HWND,
+        pid: u32,
         rect: RECT,
         is_desktop: bool,
-        process_name: String,
-        title: String,
     }
 
     fn get_window_class(hwnd: HWND) -> String {
@@ -297,10 +300,9 @@ mod win32_tracker {
         if class_name == "Progman" || (class_name == "WorkerW" && has_shelldll_defview(hwnd)) {
             list.push(WindowEntry {
                 hwnd,
+                pid,
                 rect,
                 is_desktop: true,
-                process_name: "desktop".to_string(),
-                title: "Masaüstü".to_string(),
             });
             return 1;
         }
@@ -319,18 +321,18 @@ mod win32_tracker {
             return 1;
         }
 
-        let title = get_window_title(hwnd);
-        if title.trim().is_empty() {
+        // Quick title length check without allocating String unless needed
+        let mut title_buf = [0u16; 8];
+        let title_len = unsafe { GetWindowTextW(hwnd, title_buf.as_mut_ptr(), title_buf.len() as i32) };
+        if title_len <= 0 {
             return 1;
         }
 
-        let process_name = get_process_name(pid);
         list.push(WindowEntry {
             hwnd,
+            pid,
             rect,
             is_desktop: false,
-            process_name,
-            title,
         });
 
         1
@@ -358,13 +360,16 @@ mod win32_tracker {
         let entries = snapshot_z_ordered_windows();
         if let Some(top) = find_top_entry_at_point(&entries, phys_x, phys_y) {
             if !top.is_desktop {
-                let label = friendly_app_label(&top.process_name, &top.title);
+                // Lazily query process name & title ONLY for the single hit window
+                let process_name = get_process_name(top.pid);
+                let title = get_window_title(top.hwnd);
+                let label = friendly_app_label(&process_name, &title);
                 return PinnedTargetInfo {
                     target_type: "window".to_string(),
                     hwnd: top.hwnd as u64,
-                    process_name: top.process_name.clone(),
+                    process_name,
                     label,
-                    title: top.title.clone(),
+                    title,
                 };
             }
         }
@@ -394,7 +399,6 @@ mod win32_tracker {
             let top_at_point = find_top_entry_at_point(&entries, phys_x, phys_y);
 
             if q.target_type == "desktop" {
-                // Visible only when no application window covers this point on the desktop
                 let is_desktop_exposed = match top_at_point {
                     Some(entry) => entry.is_desktop,
                     None => true,
@@ -409,7 +413,6 @@ mod win32_tracker {
                 let hwnd_alive = target_hwnd != 0 && unsafe { IsWindow(target_hwnd) } != 0;
 
                 if hwnd_alive && unsafe { IsIconic(target_hwnd) } != 0 {
-                    // Target window is minimized -> hide the note along with it!
                     results.push(NoteVisibilityResult {
                         id: q.id,
                         visible: false,
@@ -418,23 +421,23 @@ mod win32_tracker {
                     continue;
                 }
 
-                // Check who is visually on top at the note's center coordinate
                 let (visible, resolved_hwnd) = match top_at_point {
                     Some(top) if !top.is_desktop => {
                         if hwnd_alive && top.hwnd == target_hwnd {
                             (true, q.hwnd)
-                        } else if !q.process_name.is_empty() && top.process_name == q.process_name {
-                            // Same application is on top at this coordinate (e.g. re-opened or same app window)
-                            (true, top.hwnd as u64)
+                        } else if !q.process_name.is_empty() {
+                            // Lazily resolve process name only when HWND didn't match directly
+                            let top_proc = get_process_name(top.pid);
+                            if top_proc == q.process_name {
+                                (true, top.hwnd as u64)
+                            } else {
+                                (false, q.hwnd)
+                            }
                         } else {
-                            // Covered by a different application window
                             (false, q.hwnd)
                         }
                     }
-                    _ => {
-                        // Only desktop is underneath this point (e.g. target window was minimized, closed, or moved away)
-                        (false, q.hwnd)
-                    }
+                    _ => (false, q.hwnd),
                 };
 
                 results.push(NoteVisibilityResult {
@@ -522,6 +525,8 @@ fn open_notes_db(app: &AppHandle) -> Result<Connection, String> {
     let _ = conn.execute_batch(
         "PRAGMA journal_mode = WAL;
          PRAGMA synchronous = NORMAL;
+         PRAGMA temp_store = MEMORY;
+         PRAGMA cache_size = -4000;
          CREATE TABLE IF NOT EXISTS notes (
              id TEXT PRIMARY KEY,
              text TEXT NOT NULL DEFAULT '',
@@ -535,6 +540,8 @@ fn open_notes_db(app: &AppHandle) -> Result<Connection, String> {
              in_basket INTEGER NOT NULL DEFAULT 0,
              pinned_target_json TEXT,
              linked_ids_json TEXT,
+             active_timer_json TEXT,
+             drawing_json TEXT,
              created_at INTEGER NOT NULL DEFAULT 0,
              updated_at INTEGER NOT NULL DEFAULT 0,
              sort_order INTEGER NOT NULL DEFAULT 0
@@ -546,6 +553,21 @@ fn open_notes_db(app: &AppHandle) -> Result<Connection, String> {
     let _ = conn.execute("ALTER TABLE notes ADD COLUMN drawing_json TEXT", []);
 
     Ok(conn)
+}
+
+fn with_db_conn<F, R>(app: &AppHandle, db_state: &State<'_, DbState>, f: F) -> Result<R, String>
+where
+    F: FnOnce(&mut Connection) -> Result<R, String>,
+{
+    let mut guard = db_state
+        .conn
+        .lock()
+        .map_err(|_| "Failed to lock SQLite connection mutex".to_string())?;
+    if guard.is_none() {
+        *guard = Some(open_notes_db(app)?);
+    }
+    let conn = guard.as_mut().unwrap();
+    f(conn)
 }
 
 fn write_notes_to_sqlite(conn: &mut Connection, notes: &[StoredNoteRecord]) -> Result<(), String> {
@@ -610,93 +632,95 @@ fn write_notes_to_sqlite(conn: &mut Connection, notes: &[StoredNoteRecord]) -> R
 }
 
 #[tauri::command]
-fn load_notes(app: AppHandle) -> Result<String, String> {
-    let mut conn = open_notes_db(&app)?;
+fn load_notes(app: AppHandle, db_state: State<'_, DbState>) -> Result<String, String> {
+    with_db_conn(&app, &db_state, |conn| {
+        let mut notes = Vec::<StoredNoteRecord>::new();
+        {
+            let mut stmt = conn
+                .prepare_cached(
+                    "SELECT id, text, color, x, y, width, height, rotation,
+                            z_index, in_basket, pinned_target_json, linked_ids_json, active_timer_json, drawing_json, created_at, updated_at
+                     FROM notes
+                     ORDER BY sort_order ASC, created_at ASC",
+                )
+                .map_err(|e| format!("Failed to query notes from SQLite: {}", e))?;
 
-    let mut notes = Vec::<StoredNoteRecord>::new();
-    {
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, text, color, x, y, width, height, rotation,
-                        z_index, in_basket, pinned_target_json, linked_ids_json, active_timer_json, drawing_json, created_at, updated_at
-                 FROM notes
-                 ORDER BY sort_order ASC, created_at ASC",
-            )
-            .map_err(|e| format!("Failed to query notes from SQLite: {}", e))?;
+            let rows = stmt
+                .query_map([], |row| {
+                    let pinned_raw: Option<String> = row.get(10)?;
+                    let pinned_target = pinned_raw
+                        .as_deref()
+                        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+                    let linked_raw: Option<String> = row.get(11).ok().flatten();
+                    let linked_ids = linked_raw
+                        .as_deref()
+                        .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+                        .unwrap_or_default();
+                    let timer_raw: Option<String> = row.get(12).ok().flatten();
+                    let active_timer = timer_raw
+                        .as_deref()
+                        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+                    let drawing_raw: Option<String> = row.get(13).ok().flatten();
+                    let drawing = drawing_raw
+                        .as_deref()
+                        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+                    let in_basket_int: i64 = row.get(9)?;
 
-        let rows = stmt
-            .query_map([], |row| {
-                let pinned_raw: Option<String> = row.get(10)?;
-                let pinned_target = pinned_raw
-                    .as_deref()
-                    .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
-                let linked_raw: Option<String> = row.get(11).ok().flatten();
-                let linked_ids = linked_raw
-                    .as_deref()
-                    .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
-                    .unwrap_or_default();
-                let timer_raw: Option<String> = row.get(12).ok().flatten();
-                let active_timer = timer_raw
-                    .as_deref()
-                    .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
-                let drawing_raw: Option<String> = row.get(13).ok().flatten();
-                let drawing = drawing_raw
-                    .as_deref()
-                    .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
-                let in_basket_int: i64 = row.get(9)?;
-
-                Ok(StoredNoteRecord {
-                    id: row.get(0)?,
-                    text: row.get(1)?,
-                    color: row.get(2)?,
-                    x: row.get(3)?,
-                    y: row.get(4)?,
-                    width: row.get(5)?,
-                    height: row.get(6)?,
-                    rotation: row.get(7)?,
-                    z_index: row.get(8)?,
-                    in_basket: in_basket_int != 0,
-                    pinned_target,
-                    linked_ids,
-                    active_timer,
-                    drawing,
-                    created_at: row.get(14)?,
-                    updated_at: row.get(15)?,
+                    Ok(StoredNoteRecord {
+                        id: row.get(0)?,
+                        text: row.get(1)?,
+                        color: row.get(2)?,
+                        x: row.get(3)?,
+                        y: row.get(4)?,
+                        width: row.get(5)?,
+                        height: row.get(6)?,
+                        rotation: row.get(7)?,
+                        z_index: row.get(8)?,
+                        in_basket: in_basket_int != 0,
+                        pinned_target,
+                        linked_ids,
+                        active_timer,
+                        drawing,
+                        created_at: row.get(14)?,
+                        updated_at: row.get(15)?,
+                    })
                 })
-            })
-            .map_err(|e| format!("Failed to map SQLite rows: {}", e))?;
+                .map_err(|e| format!("Failed to map SQLite rows: {}", e))?;
 
-        for r in rows.flatten() {
-            notes.push(r);
+            for r in rows.flatten() {
+                notes.push(r);
+            }
         }
-    }
 
-    // One-time automatic migration if SQLite is empty and an older notes.json exists
-    if notes.is_empty() {
-        if let Ok(legacy_dir) = app.path().app_data_dir() {
-            let legacy_json_path = legacy_dir.join("notes.json");
-            if legacy_json_path.exists() {
-                if let Ok(raw) = fs::read_to_string(&legacy_json_path) {
-                    if let Ok(migrated) = serde_json::from_str::<Vec<StoredNoteRecord>>(&raw) {
-                        if !migrated.is_empty() {
-                            let _ = write_notes_to_sqlite(&mut conn, &migrated);
-                            notes = migrated;
+        if notes.is_empty() {
+            if let Ok(legacy_dir) = app.path().app_data_dir() {
+                let legacy_json_path = legacy_dir.join("notes.json");
+                if legacy_json_path.exists() {
+                    if let Ok(raw) = fs::read_to_string(&legacy_json_path) {
+                        if let Ok(migrated) = serde_json::from_str::<Vec<StoredNoteRecord>>(&raw) {
+                            if !migrated.is_empty() {
+                                let _ = write_notes_to_sqlite(conn, &migrated);
+                                notes = migrated;
+                            }
                         }
                     }
                 }
             }
         }
-    }
 
-    serde_json::to_string(&notes).map_err(|e| format!("Failed to serialize loaded notes: {}", e))
+        serde_json::to_string(&notes).map_err(|e| format!("Failed to serialize loaded notes: {}", e))
+    })
 }
 
 #[tauri::command]
-fn save_notes(app: AppHandle, notes_json: String) -> Result<(), String> {
+fn save_notes(
+    app: AppHandle,
+    db_state: State<'_, DbState>,
+    notes_json: String,
+) -> Result<(), String> {
     let parsed: Vec<StoredNoteRecord> = serde_json::from_str(&notes_json)
         .map_err(|e| format!("Failed to parse notes payload: {}", e))?;
-    let mut conn = open_notes_db(&app)?;
-    write_notes_to_sqlite(&mut conn, &parsed)
+    with_db_conn(&app, &db_state, |conn| write_notes_to_sqlite(conn, &parsed))
 }
 
 #[tauri::command]
@@ -815,6 +839,9 @@ pub fn run() {
             regions,
             is_dragging,
             is_ignoring,
+        })
+        .manage(DbState {
+            conn: Mutex::new(None),
         })
         .setup(move |app| {
             // Build System Tray icon & menu:
@@ -940,51 +967,66 @@ pub fn run() {
                 }
 
                 let win_clone = window.clone();
-                thread::spawn(move || loop {
-                    thread::sleep(Duration::from_millis(30));
-
-                    let dragging = is_dragging_bg.lock().map(|d| *d).unwrap_or(false);
-                    if dragging {
-                        let currently_ignoring =
-                            is_ignoring_bg.lock().map(|i| *i).unwrap_or(false);
-                        if currently_ignoring {
-                            let _ = win_clone.set_ignore_cursor_events(false);
-                            if let Ok(mut i) = is_ignoring_bg.lock() {
-                                *i = false;
-                            }
-                        }
-                        continue;
-                    }
-
-                    let Ok(cursor_phys) = win_clone.cursor_position() else {
-                        continue;
-                    };
-                    let win_pos = win_clone
+                thread::spawn(move || {
+                    let mut cached_pos = win_clone
                         .outer_position()
                         .unwrap_or(tauri::PhysicalPosition::new(0, 0));
-                    let scale = win_clone.scale_factor().unwrap_or(1.0);
+                    let mut cached_scale = win_clone.scale_factor().unwrap_or(1.0);
+                    let mut tick_count: u32 = 0;
 
-                    let logical_x = (cursor_phys.x - win_pos.x as f64) / scale;
-                    let logical_y = (cursor_phys.y - win_pos.y as f64) / scale;
+                    loop {
+                        thread::sleep(Duration::from_millis(40));
+                        tick_count = tick_count.wrapping_add(1);
 
-                    let hit = if let Ok(rects) = regions_bg.lock() {
-                        rects.iter().any(|r| {
-                            logical_x >= (r.x - 12.0)
-                                && logical_x <= (r.x + r.width + 12.0)
-                                && logical_y >= (r.y - 12.0)
-                                && logical_y <= (r.y + r.height + 12.0)
-                        })
-                    } else {
-                        true
-                    };
+                        if tick_count % 35 == 0 {
+                            if let Ok(pos) = win_clone.outer_position() {
+                                cached_pos = pos;
+                            }
+                            if let Ok(sc) = win_clone.scale_factor() {
+                                cached_scale = sc;
+                            }
+                        }
 
-                    let should_ignore = !hit;
-                    let currently_ignoring = is_ignoring_bg.lock().map(|i| *i).unwrap_or(false);
+                        let dragging = is_dragging_bg.lock().map(|d| *d).unwrap_or(false);
+                        if dragging {
+                            let currently_ignoring =
+                                is_ignoring_bg.lock().map(|i| *i).unwrap_or(false);
+                            if currently_ignoring {
+                                let _ = win_clone.set_ignore_cursor_events(false);
+                                if let Ok(mut i) = is_ignoring_bg.lock() {
+                                    *i = false;
+                                }
+                            }
+                            continue;
+                        }
 
-                    if should_ignore != currently_ignoring {
-                        if win_clone.set_ignore_cursor_events(should_ignore).is_ok() {
-                            if let Ok(mut i) = is_ignoring_bg.lock() {
-                                *i = should_ignore;
+                        let Ok(cursor_phys) = win_clone.cursor_position() else {
+                            continue;
+                        };
+
+                        let logical_x = (cursor_phys.x - cached_pos.x as f64) / cached_scale;
+                        let logical_y = (cursor_phys.y - cached_pos.y as f64) / cached_scale;
+
+                        let hit = if let Ok(rects) = regions_bg.lock() {
+                            rects.iter().any(|r| {
+                                logical_x >= (r.x - 12.0)
+                                    && logical_x <= (r.x + r.width + 12.0)
+                                    && logical_y >= (r.y - 12.0)
+                                    && logical_y <= (r.y + r.height + 12.0)
+                            })
+                        } else {
+                            true
+                        };
+
+                        let should_ignore = !hit;
+                        let currently_ignoring =
+                            is_ignoring_bg.lock().map(|i| *i).unwrap_or(false);
+
+                        if should_ignore != currently_ignoring {
+                            if win_clone.set_ignore_cursor_events(should_ignore).is_ok() {
+                                if let Ok(mut i) = is_ignoring_bg.lock() {
+                                    *i = should_ignore;
+                                }
                             }
                         }
                     }

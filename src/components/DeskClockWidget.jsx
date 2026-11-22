@@ -180,11 +180,11 @@ export default function DeskClockWidget({
   const dragStartRef = useRef(null);
   const didMoveRef = useRef(false);
 
-  // Smooth time update (250ms so countdown ring and second hand feel responsive)
+  // 1-second tick for clock hands and countdown rings (low CPU usage)
   useEffect(() => {
     const timer = setInterval(() => {
       setNow(new Date());
-    }, 250);
+    }, 1000);
     return () => clearInterval(timer);
   }, []);
 

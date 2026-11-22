@@ -338,22 +338,27 @@ export function useNotesStore() {
     };
   }, []);
 
-  // Save notes instantaneously to both localStorage and Tauri notes.json whenever notes change
+  // Save notes with 180ms debounce to both localStorage and Tauri SQLite postit.db
+  // so fast typing, resizing, and freehand drawing run at 60/120 FPS without IPC stutter.
   useEffect(() => {
     if (!isLoaded) return;
 
-    const serialized = JSON.stringify(notes, null, 2);
-    try {
-      localStorage.setItem(STORAGE_KEY_NOTES, serialized);
-    } catch (err) {
-      console.warn("Failed to save notes to localStorage:", err);
-    }
+    const timer = setTimeout(() => {
+      const serialized = JSON.stringify(notes);
+      try {
+        localStorage.setItem(STORAGE_KEY_NOTES, serialized);
+      } catch (err) {
+        console.warn("Failed to save notes to localStorage:", err);
+      }
 
-    if (isTauriRuntime()) {
-      invoke("save_notes", { notesJson: serialized }).catch((err) => {
-        console.warn("Failed to save notes to notes.json:", err);
-      });
-    }
+      if (isTauriRuntime()) {
+        invoke("save_notes", { notesJson: serialized }).catch((err) => {
+          console.warn("Failed to save notes to postit.db:", err);
+        });
+      }
+    }, 180);
+
+    return () => clearTimeout(timer);
   }, [notes, isLoaded]);
 
   // Persist active top stack sheet draft

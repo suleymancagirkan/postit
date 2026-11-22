@@ -90,12 +90,19 @@ export default function App() {
   const isDraggingRef = useRef(false);
   const hoverCountRef = useRef(0);
   const firedTimersRef = useRef(new Set());
+  const lastIgnoreStateRef = useRef(null);
+  const lastRegionsSigRef = useRef("");
 
   const activeNotes = notes.filter((n) => !n.inBasket);
   const basketNotes = notes.filter((n) => Boolean(n.inBasket));
+  const hasAnyActiveNoteTimer = activeNotes.some((n) =>
+    Boolean(n.activeTimer?.targetAt)
+  );
 
-  // Tick every 500ms to evaluate @25d / @19.20 timers across all notes
+  // Only tick when at least one note has an active @25d / @19.20 timer (zero idle re-renders)
   useEffect(() => {
+    if (!hasAnyActiveNoteTimer) return;
+
     const interval = setInterval(() => {
       const currentNow = Date.now();
       setNowTs(currentNow);
@@ -116,10 +123,10 @@ export default function App() {
           );
         }
       }
-    }, 500);
+    }, 1000);
 
     return () => clearInterval(interval);
-  }, [activeNotes]);
+  }, [hasAnyActiveNoteTimer, activeNotes]);
 
   // Repeat alarm chime every 2.8s while any note's @timer is ringing
   useEffect(() => {
@@ -203,16 +210,12 @@ export default function App() {
 
   const applyIgnoreCursorEvents = useCallback(async (ignore) => {
     if (!isTauriRuntime()) return;
+    if (lastIgnoreStateRef.current === ignore) return;
+    lastIgnoreStateRef.current = ignore;
     try {
-      const appWindow = getCurrentWindow();
-      await appWindow.setIgnoreCursorEvents(ignore);
       await invoke("set_click_through", { ignore });
     } catch {
-      try {
-        await invoke("set_click_through", { ignore });
-      } catch {
-        // ignore in browser preview
-      }
+      // ignore in browser preview
     }
   }, []);
 
@@ -222,12 +225,18 @@ export default function App() {
     const regions = Array.from(elements).map((el) => {
       const r = el.getBoundingClientRect();
       return {
-        x: r.left,
-        y: r.top,
-        width: r.width,
-        height: r.height,
+        x: Math.round(r.left),
+        y: Math.round(r.top),
+        width: Math.round(r.width),
+        height: Math.round(r.height),
       };
     });
+
+    const sig = `${isDraggingRef.current}:${regions
+      .map((r) => `${r.x},${r.y},${r.width},${r.height}`)
+      .join("|")}`;
+    if (sig === lastRegionsSigRef.current) return;
+    lastRegionsSigRef.current = sig;
 
     invoke("update_hit_regions", {
       regions,

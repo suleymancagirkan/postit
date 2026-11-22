@@ -334,7 +334,7 @@ function RealisticThumbtack({ isPinned, pinPulse, targetLabel }) {
   );
 }
 
-export default function PinnedNote({
+const PinnedNote = React.memo(function PinnedNote({
   note,
   isVisibleOnScreen = true,
   isStringTargetHighlighted = false,
@@ -932,4 +932,6 @@ export default function PinnedNote({
       </div>
     </motion.div>
   );
-}
+});
+
+export default PinnedNote;
