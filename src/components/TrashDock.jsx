@@ -46,23 +46,7 @@ export default function TrashDock({
           }}
           className="fixed bottom-4 right-5 z-[10000] flex flex-col items-center select-none pointer-events-auto"
         >
-          {/* Floating label badge above the can when active */}
-          <motion.div
-            initial={false}
-            animate={{
-              y: isOverTrash ? -6 : 0,
-              scale: isOverTrash ? 1.05 : 0.95,
-            }}
-            className={`mb-1 px-2.5 py-0.5 rounded-full text-[10.5px] font-bold tracking-wide shadow-lg transition-colors duration-200 ${
-              isOverTrash
-                ? "bg-rose-600 text-white ring-2 ring-rose-300/70"
-                : "bg-neutral-900/85 text-neutral-200"
-            }`}
-          >
-            {isOverTrash ? "Bırak • Buruşturup At!" : "Çöp Kutusu"}
-          </motion.div>
-
-          {/* 2.5D Trash Can Illustration */}
+          {/* 2.5D Trash Can Illustration (No badge above) */}
           <div className="relative w-32 h-36 flex items-center justify-center">
             {/* Realistic Floor Contact Shadow */}
             <motion.div

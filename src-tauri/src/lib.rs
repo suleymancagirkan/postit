@@ -609,6 +609,13 @@ pub fn run() {
                 true,
                 None::<&str>,
             )?;
+            let show_basket_item = MenuItem::with_id(
+                app,
+                "show_basket",
+                "Sepeti Getir",
+                true,
+                None::<&str>,
+            )?;
             let sep1 = PredefinedMenuItem::separator(app)?;
             let stash_keep_pins_item = MenuItem::with_id(
                 app,
@@ -638,6 +645,7 @@ pub fn run() {
                 app,
                 &[
                     &toggle_stack_item,
+                    &show_basket_item,
                     &sep1,
                     &stash_keep_pins_item,
                     &stash_clear_pins_item,
@@ -658,6 +666,13 @@ pub fn run() {
                             let _ = win.show();
                         }
                         let _ = app_handle.emit("tray-action", "toggle_stack");
+                    }
+                    "show_basket" => {
+                        if let Some(win) = app_handle.get_webview_window("main") {
+                            let _ = win.set_skip_taskbar(true);
+                            let _ = win.show();
+                        }
+                        let _ = app_handle.emit("tray-action", "show_basket");
                     }
                     "stash_all_keep_pins" => {
                         let _ = app_handle.emit("tray-action", "stash_all_keep_pins");

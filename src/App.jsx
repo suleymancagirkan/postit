@@ -9,6 +9,8 @@ import BasketDock, { isPointInBasketZone } from "./components/BasketDock";
 import { useNotesStore, clampNoteSize } from "./hooks/useNotesStore";
 import "./App.css";
 
+const BASKET_SUMMON_DURATION_MS = 25000;
+
 function isTauriRuntime() {
   return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 }
@@ -30,8 +32,12 @@ export default function App() {
     restoreAllNotesFromBasket,
   } = useNotesStore();
 
-  // Minimizing only minimizes the StickyStack; active notes remain on screen
+  // Minimizing only hides the StickyStack; active notes remain on screen
   const [isStackMinimized, setIsStackMinimized] = useState(false);
+
+  // Basket is hidden by default unless dragging a note or summoned via Tray ("Sepeti Getir") for 25s
+  const [isBasketSummoned, setIsBasketSummoned] = useState(false);
+  const basketTimerRef = useRef(null);
 
   const [dragState, setDragState] = useState({
     isDragging: false,
@@ -48,6 +54,23 @@ export default function App() {
 
   const activeNotes = notes.filter((n) => !n.inBasket);
   const basketNotes = notes.filter((n) => Boolean(n.inBasket));
+
+  const summonBasketTemporarily = useCallback((durationMs = BASKET_SUMMON_DURATION_MS) => {
+    setIsBasketSummoned(true);
+    if (basketTimerRef.current) {
+      clearTimeout(basketTimerRef.current);
+    }
+    basketTimerRef.current = setTimeout(() => {
+      setIsBasketSummoned(false);
+      basketTimerRef.current = null;
+    }, durationMs);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (basketTimerRef.current) clearTimeout(basketTimerRef.current);
+    };
+  }, []);
 
   const applyIgnoreCursorEvents = useCallback(async (ignore) => {
     if (!isTauriRuntime()) return;
@@ -83,7 +106,7 @@ export default function App() {
     }).catch(() => {});
   }, []);
 
-  // Listen to System Tray actions ("toggle_stack", "stash_all_keep_pins", "stash_all_clear_pins", "restore_all_basket")
+  // Listen to System Tray actions
   useEffect(() => {
     if (!isTauriRuntime()) return;
 
@@ -92,12 +115,17 @@ export default function App() {
       const action = event.payload;
       if (action === "toggle_stack") {
         setIsStackMinimized((prev) => !prev);
+      } else if (action === "show_basket") {
+        summonBasketTemporarily(BASKET_SUMMON_DURATION_MS);
       } else if (action === "stash_all_keep_pins") {
         stashAllNotesToBasket(false);
+        summonBasketTemporarily(BASKET_SUMMON_DURATION_MS);
       } else if (action === "stash_all_clear_pins") {
         stashAllNotesToBasket(true);
+        summonBasketTemporarily(BASKET_SUMMON_DURATION_MS);
       } else if (action === "restore_all_basket") {
         restoreAllNotesFromBasket(false);
+        setIsBasketSummoned(false);
       }
     })
       .then((unlisten) => {
@@ -108,7 +136,7 @@ export default function App() {
     return () => {
       if (unlistenFn) unlistenFn();
     };
-  }, [stashAllNotesToBasket, restoreAllNotesFromBasket]);
+  }, [stashAllNotesToBasket, restoreAllNotesFromBasket, summonBasketTemporarily]);
 
   // Poll OS window visibility for active screen-pinned notes
   useEffect(() => {
@@ -172,7 +200,14 @@ export default function App() {
       clearInterval(timer);
       window.removeEventListener("resize", syncInteractiveRegions);
     };
-  }, [notes, visibilityMap, isStackMinimized, dragState.isDragging, syncInteractiveRegions]);
+  }, [
+    notes,
+    visibilityMap,
+    isStackMinimized,
+    isBasketSummoned,
+    dragState.isDragging,
+    syncInteractiveRegions,
+  ]);
 
   useEffect(() => {
     const handleGlobalMouseMove = (e) => {
@@ -205,6 +240,23 @@ export default function App() {
       applyIgnoreCursorEvents(true);
     }
   }, [applyIgnoreCursorEvents]);
+
+  const handleRestoreNoteFromBasket = useCallback(
+    (noteId, clearPin = false) => {
+      restoreNoteFromBasket(noteId, clearPin);
+      // Keep the 25s timer alive while user is pulling notes out, or hide if last note was taken out
+      if (basketNotes.length <= 1) {
+        setIsBasketSummoned(false);
+        if (basketTimerRef.current) {
+          clearTimeout(basketTimerRef.current);
+          basketTimerRef.current = null;
+        }
+      } else {
+        summonBasketTemporarily(BASKET_SUMMON_DURATION_MS);
+      }
+    },
+    [restoreNoteFromBasket, basketNotes.length, summonBasketTemporarily]
+  );
 
   const handleDragStateChange = useCallback(
     ({ isDragging, source, noteId = null, clientX, clientY, isDrop = false }) => {
@@ -250,7 +302,7 @@ export default function App() {
 
   return (
     <main className="relative w-screen h-screen bg-transparent overflow-hidden select-none">
-      {/* 1. Post-it Stack in the corner (Minimizing hides only this stack, not the pinned notes) */}
+      {/* 1. Post-it Stack in the corner */}
       {!isStackMinimized && (
         <StickyStack
           draft={stackDraft}
@@ -265,7 +317,7 @@ export default function App() {
         />
       )}
 
-      {/* 2. Pinned Independent Sticker Cards (Stay on screen even when the stack is minimized) */}
+      {/* 2. Pinned Independent Sticker Cards */}
       {activeNotes.map((note) => {
         const isVisibleOnScreen = note.pinnedTarget
           ? visibilityMap[note.id] !== false
@@ -288,22 +340,17 @@ export default function App() {
         );
       })}
 
-      {/* 3. Right-Edge Storage Basket Dock (slides in when dragging, or accessible via right tab) */}
+      {/* 3. 2.5D Storage Basket (Only visible while dragging a note OR for 25s when summoned via System Tray) */}
       <BasketDock
-        isDragging={dragState.isDragging}
+        isVisible={dragState.isDragging || isBasketSummoned}
         isOverBasket={dragState.isOverBasket}
         basketNotes={basketNotes}
-        activeNotesCount={activeNotes.length}
-        isStackMinimized={isStackMinimized}
-        onRestoreNote={restoreNoteFromBasket}
-        onRestoreAll={restoreAllNotesFromBasket}
-        onStashAll={stashAllNotesToBasket}
-        onToggleStackMinimized={() => setIsStackMinimized((prev) => !prev)}
+        onRestoreNote={handleRestoreNoteFromBasket}
         onInteractiveEnter={handleInteractiveEnter}
         onInteractiveLeave={handleInteractiveLeave}
       />
 
-      {/* 4. Bottom-Right 45-Degree Diagonal Trash Dock */}
+      {/* 4. 2.5D Metallic Trash Can (Only visible while dragging a note) */}
       <TrashDock
         isVisible={dragState.isDragging}
         isOverTrash={dragState.isOverTrash}
