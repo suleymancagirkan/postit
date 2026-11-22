@@ -3,27 +3,30 @@ import React, { useState, useRef } from "react";
 export const DOODLE_PENS = [
   {
     id: "ink",
-    label: "Mürekkep Kalem",
-    color: "#1E293B",
-    width: 2.4,
-    opacity: 0.9,
-    swatchBg: "bg-[#1E293B]",
+    label: "Mürekkep",
+    color: "#18181B",
+    width: 2.3,
+    opacity: 0.94,
+    blendMode: "normal",
+    dotBg: "bg-[#18181B]",
   },
   {
     id: "red",
-    label: "Kırmızı Kalem",
-    color: "#E11D48",
+    label: "Kırmızı",
+    color: "#DC2626",
     width: 2.6,
-    opacity: 0.92,
-    swatchBg: "bg-[#E11D48]",
+    opacity: 0.94,
+    blendMode: "normal",
+    dotBg: "bg-[#DC2626]",
   },
   {
     id: "highlighter",
-    label: "Fosforlu Kalem",
+    label: "Fosforlu",
     color: "#F59E0B",
-    width: 10,
-    opacity: 0.34,
-    swatchBg: "bg-[#F59E0B]",
+    width: 11.5,
+    opacity: 0.42,
+    blendMode: "multiply",
+    dotBg: "bg-[#F59E0B]",
   },
 ];
 
@@ -89,6 +92,7 @@ export default function DoodleCanvas({
       color: activePen.color,
       width: activePen.width * 4.2,
       opacity: activePen.opacity,
+      blendMode: activePen.blendMode || "normal",
       points: [pt],
     });
   };
@@ -148,11 +152,12 @@ export default function DoodleCanvas({
           key={idx}
           d={pointsToSmoothSvgPath(s.points)}
           fill="none"
-          stroke={s.color || "#1E293B"}
+          stroke={s.color || "#18181B"}
           strokeWidth={s.width || 10}
-          strokeOpacity={s.opacity ?? 0.9}
+          strokeOpacity={s.opacity ?? 0.92}
           strokeLinecap="round"
           strokeLinejoin="round"
+          style={{ mixBlendMode: s.blendMode || "normal" }}
         />
       ))}
     </svg>

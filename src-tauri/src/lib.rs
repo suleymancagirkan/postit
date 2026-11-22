@@ -961,7 +961,7 @@ pub fn run() {
 
             let mut tray_builder = TrayIconBuilder::new()
                 .menu(&tray_menu)
-                .tooltip("Post-it")
+                .tooltip("Post-it Studio")
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app_handle, event| {
                     let action = event.id.as_ref();

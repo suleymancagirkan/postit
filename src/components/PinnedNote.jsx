@@ -831,65 +831,71 @@ const PinnedNote = React.memo(function PinnedNote({
             onUpdate?.(note.id, { drawing: nextStrokes })
           }
         />
+
+        {/* Floating 3-Pen Segmented Pill Selector (Mürekkep / Kırmızı / Fosforlu) */}
+        {isDrawingMode && (
+          <div
+            data-no-drag="true"
+            className="absolute bottom-1.5 left-1/2 -translate-x-1/2 z-30 inline-flex items-center gap-0.5 p-0.5 rounded-full bg-neutral-100/95 border border-black/10 shadow-md whitespace-nowrap"
+          >
+            {DOODLE_PENS.map((pen) => {
+              const isPenActive = pen.id === activePenId;
+              return (
+                <button
+                  key={pen.id}
+                  type="button"
+                  title={pen.label}
+                  onClick={() => setActivePenId(pen.id)}
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9.5px] font-bold transition-all cursor-pointer ${
+                    isPenActive
+                      ? "bg-white text-neutral-950 shadow-xs"
+                      : "text-neutral-500 hover:text-neutral-800"
+                  }`}
+                >
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${pen.dotBg}`} />
+                  <span>{pen.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      {/* Bottom Bar: Left Color Dots / Drawing Pen Tools & Right Resize Handle */}
+      {/* Bottom Bar: Left Color Dots / Drawing Toggle & Right Resize Handle */}
       <div
         data-no-drag="true"
         className="px-3 pb-2.5 pt-1 flex items-center justify-between"
       >
         <div className="flex items-center gap-1.5">
-          {!isDrawingMode ? (
-            COLOR_LIST.map((c) => {
-              const isSelected = c.id === note.color;
-              return (
-                <button
-                  key={c.id}
-                  type="button"
-                  title={c.label}
-                  onClick={() => onUpdate?.(note.id, { color: c.id })}
-                  className={`w-3.5 h-3.5 rounded-full ${c.swatch} border border-black/20 transition-transform duration-150 cursor-pointer ${
-                    isSelected
-                      ? "scale-125 ring-2 ring-neutral-900/70"
-                      : "hover:scale-110 opacity-75 hover:opacity-100"
-                  }`}
-                />
-              );
-            })
-          ) : (
-            <div className="flex items-center gap-1.5">
-              {DOODLE_PENS.map((pen) => {
-                const isPenActive = pen.id === activePenId;
-                return (
-                  <button
-                    key={pen.id}
-                    type="button"
-                    title={pen.label}
-                    onClick={() => setActivePenId(pen.id)}
-                    className={`w-3.5 h-3.5 rounded-full ${pen.swatchBg} border border-white/40 transition-transform cursor-pointer ${
-                      isPenActive
-                        ? "scale-125 ring-2 ring-neutral-900"
-                        : "opacity-70 hover:opacity-100"
-                    }`}
-                  />
-                );
-              })}
-              {Array.isArray(note.drawing) && note.drawing.length > 0 && (
-                <button
-                  type="button"
-                  title="Son Çizgiyi Geri Al (Shift+Tık: Tüm Çizimi Temizle)"
-                  onClick={(e) => {
-                    const next = e.shiftKey
-                      ? []
-                      : note.drawing.slice(0, -1);
-                    onUpdate?.(note.id, { drawing: next });
-                  }}
-                  className={`p-0.5 rounded-md ${theme.accentBg} ${theme.text} hover:brightness-95 cursor-pointer`}
-                >
-                  <Undo2 className="w-3 h-3" />
-                </button>
-              )}
-            </div>
+          {COLOR_LIST.map((c) => {
+            const isSelected = c.id === note.color;
+            return (
+              <button
+                key={c.id}
+                type="button"
+                title={c.label}
+                onClick={() => onUpdate?.(note.id, { color: c.id })}
+                className={`w-3.5 h-3.5 rounded-full ${c.swatch} border border-black/20 transition-transform duration-150 cursor-pointer ${
+                  isSelected
+                    ? "scale-125 ring-2 ring-neutral-900/70"
+                    : "hover:scale-110 opacity-75 hover:opacity-100"
+                }`}
+              />
+            );
+          })}
+
+          {isDrawingMode && Array.isArray(note.drawing) && note.drawing.length > 0 && (
+            <button
+              type="button"
+              title="Son Çizgiyi Geri Al (Shift+Tık: Tüm Çizimi Temizle)"
+              onClick={(e) => {
+                const next = e.shiftKey ? [] : note.drawing.slice(0, -1);
+                onUpdate?.(note.id, { drawing: next });
+              }}
+              className={`p-1 rounded-full ${theme.accentBg} ${theme.text} hover:brightness-95 cursor-pointer`}
+            >
+              <Undo2 className="w-3 h-3" />
+            </button>
           )}
 
           {/* Freehand Drawing Mode Toggle Button */}
