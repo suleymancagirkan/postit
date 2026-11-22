@@ -25,6 +25,7 @@ import "./App.css";
 
 const BASKET_SUMMON_DURATION_MS = 25000;
 const STORAGE_KEY_CLOCK_POS = "postit_desktop_clock_pos_v1";
+const STORAGE_KEY_CLOCK_ENABLED = "postit_desktop_clock_enabled_v1";
 
 function isTauriRuntime() {
   return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
@@ -51,8 +52,19 @@ export default function App() {
 
   const [isStackMinimized, setIsStackMinimized] = useState(false);
 
-  // 2.5D iOS StandBy Mode Desktop Clock plugin state
-  const [isClockEnabled, setIsClockEnabled] = useState(true);
+  // 2.5D iOS StandBy Mode Desktop Clock plugin state (persisted in localStorage)
+  const [isClockEnabled, setIsClockEnabled] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_CLOCK_ENABLED);
+      if (saved === "false") return false;
+    } catch {
+      // ignore
+    }
+    return true;
+  });
+  const [clockRequiredNotice, setClockRequiredNotice] = useState(false);
+  const clockNoticeTimerRef = useRef(null);
+  const prevTimerCountRef = useRef(0);
   const [nowTs, setNowTs] = useState(() => Date.now());
   const [ringingNoteIds, setRingingNoteIds] = useState([]);
   const [clockPos, setClockPos] = useState(() => {
@@ -99,9 +111,40 @@ export default function App() {
     Boolean(n.activeTimer?.targetAt)
   );
 
-  // Only tick when at least one note has an active @25d / @19.20 timer (zero idle re-renders)
+  // Persist clock enabled toggle
   useEffect(() => {
-    if (!hasAnyActiveNoteTimer) return;
+    try {
+      localStorage.setItem(STORAGE_KEY_CLOCK_ENABLED, String(isClockEnabled));
+    } catch {
+      // ignore
+    }
+    if (isClockEnabled) {
+      setClockRequiredNotice(false);
+    }
+  }, [isClockEnabled]);
+
+  // Notify user if they set a @timer on a note while the StandBy Desk Clock is turned off
+  const timedNotesCount = activeNotes.filter((n) =>
+    Boolean(n.activeTimer?.targetAt)
+  ).length;
+
+  useEffect(() => {
+    if (!isClockEnabled && timedNotesCount > prevTimerCountRef.current) {
+      setClockRequiredNotice(true);
+      if (clockNoticeTimerRef.current) {
+        clearTimeout(clockNoticeTimerRef.current);
+      }
+      clockNoticeTimerRef.current = setTimeout(() => {
+        setClockRequiredNotice(false);
+        clockNoticeTimerRef.current = null;
+      }, 6500);
+    }
+    prevTimerCountRef.current = timedNotesCount;
+  }, [timedNotesCount, isClockEnabled]);
+
+  // Only tick when clock is enabled and at least one note has an active @25d / @19.20 timer
+  useEffect(() => {
+    if (!isClockEnabled || !hasAnyActiveNoteTimer) return;
 
     const interval = setInterval(() => {
       const currentNow = Date.now();
@@ -811,6 +854,40 @@ export default function App() {
         onInteractiveEnter={handleInteractiveEnter}
         onInteractiveLeave={handleInteractiveLeave}
       />
+
+      {/* 6. Notice Toast when user creates a @timer while Desk Clock is disabled */}
+      {clockRequiredNotice && !isClockEnabled && (
+        <div
+          data-interactive="true"
+          onMouseEnter={handleInteractiveEnter}
+          onMouseLeave={handleInteractiveLeave}
+          className="fixed top-6 left-1/2 -translate-x-1/2 z-[10001] flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-neutral-900/95 text-white border border-amber-400/35 shadow-2xl select-none"
+        >
+          <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
+          <span className="text-xs font-medium text-neutral-100">
+            Sayaç özelliğini kullanmak için{" "}
+            <strong className="text-amber-300">Masa Saatini</strong> tekrar açmalısınız.
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setIsClockEnabled(true);
+              setClockRequiredNotice(false);
+            }}
+            className="px-2.5 py-1 rounded-xl bg-amber-400 hover:bg-amber-300 text-neutral-950 text-[11px] font-extrabold cursor-pointer transition shrink-0"
+          >
+            Saati Aç
+          </button>
+          <button
+            type="button"
+            onClick={() => setClockRequiredNotice(false)}
+            className="text-neutral-400 hover:text-white text-sm leading-none px-1 cursor-pointer"
+            title="Kapat"
+          >
+            ×
+          </button>
+        </div>
+      )}
     </main>
   );
 }

@@ -857,7 +857,7 @@ pub fn run() {
             let toggle_clock_item = MenuItem::with_id(
                 app,
                 "toggle_clock",
-                "Masa Saatini Göster / Gizle",
+                "Masa Saatini Aç / Kapat (Sayaç)",
                 true,
                 None::<&str>,
             )?;
